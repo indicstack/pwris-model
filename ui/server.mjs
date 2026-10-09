@@ -30,7 +30,7 @@ function reviewInfo(runDir, meta) {
   return { folder, done: true, verdict: verdictLine, count: Number.isFinite(count) ? count : null };
 }
 
-function startReview(runId) {
+function startReview(runId, force = false) {
   const runDir = resolve(RUNS_DIR, runId);
   let meta = JSON.parse(readFileSync(resolve(runDir, "meta.json"), "utf8"));
   if (!meta.reviewFolder || !existsSync(meta.reviewFolder)) {
@@ -38,14 +38,23 @@ function startReview(runId) {
     if (r.status !== 0) throw new Error(`make-review failed: ${r.stderr || r.stdout}`);
     meta = JSON.parse(readFileSync(resolve(runDir, "meta.json"), "utf8"));
   }
-  if (existsSync(resolve(meta.reviewFolder, "REVIEW.md"))) throw new Error("REVIEW.md already exists in " + meta.reviewFolder);
+  if (existsSync(resolve(meta.reviewFolder, "REVIEW.md"))) {
+    if (!force) throw new Error("REVIEW.md already exists in " + meta.reviewFolder);
+    const r = spawnSync(process.execPath, [resolve(ROOT, "review/make-review.mjs"), "--run", runDir], { cwd: ROOT, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`make-review failed: ${r.stderr || r.stdout}`);
+    meta = JSON.parse(readFileSync(resolve(runDir, "meta.json"), "utf8"));
+  }
   const id = `review-${runId}-${Date.now()}`;
   const logPath = resolve(JOBS_DIR, `${id}.log`);
   const fd = openSync(logPath, "a");
-  const child = spawn(CLAUDE_BIN, ["-p", REVIEW_PROMPT, "--model", "opus", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, env: { ...process.env, PWR_API_KEY: "" }, stdio: ["ignore", fd, fd] });
+  const child = spawn(CLAUDE_BIN, ["-p", REVIEW_PROMPT, "--model", "opus", "--output-format", "json", "--no-session-persistence", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, env: { ...process.env, PWR_API_KEY: "" }, stdio: ["ignore", fd, fd] });
   const job = { id, kind: "review", arm: meta.arm, runId, started: new Date().toISOString(), status: "running", exit: null, logPath, folder: meta.reviewFolder };
   jobs.set(id, job);
-  child.on("exit", (code) => { job.status = code === 0 ? "done" : `exit ${code}`; job.exit = code; job.finished = new Date().toISOString(); });
+  child.on("exit", (code) => {
+    job.status = code === 0 ? "done" : `exit ${code}`; job.exit = code; job.finished = new Date().toISOString();
+    try { const j = JSON.parse(readFileSync(logPath, "utf8").trim().split("\n").filter((l) => l.startsWith("{")).pop() || "null"); const u = j?.usage || {};
+      updateMeta(runDir, { reviewUsage: { input: u.input_tokens || 0, cache_write: u.cache_creation_input_tokens || 0, cache_read: u.cache_read_input_tokens || 0, output: u.output_tokens || 0, cost_usd: j?.total_cost_usd ?? null, turns: j?.num_turns ?? null, model: Object.keys(j?.modelUsage || {})[0] || null } }); } catch {}
+  });
   return job;
 }
 
@@ -105,7 +114,7 @@ const server = createServer(async (req, res) => {
     const j = url.pathname.match(/^\/api\/jobs\/([^/]+)\/log$/);
     if (req.method === "GET" && j) { const job = jobs.get(decodeURIComponent(j[1])); if (!job) return json(res, 404, { error: "no job" }); res.writeHead(200, { "content-type": "text/plain" }); return res.end(readFileSync(job.logPath, "utf8").slice(-20000)); }
     const rv = url.pathname.match(/^\/api\/runs\/([^/]+)\/review$/);
-    if (req.method === "POST" && rv) return json(res, 200, startReview(decodeURIComponent(rv[1])));
+    if (req.method === "POST" && rv) { const b = await body(req); return json(res, 200, startReview(decodeURIComponent(rv[1]), Boolean(b.force))); }
     const c = url.pathname.match(/^\/api\/runs\/([^/]+)\/corrections$/);
     if (req.method === "POST" && c) { const b = await body(req); updateMeta(resolve(RUNS_DIR, decodeURIComponent(c[1])), { reviewerCorrections: Number(b.corrections), reviewNote: String(b.note || "") }); return json(res, 200, { ok: true }); }
     const q = url.pathname.match(/^\/api\/runs\/([^/]+)\/queue$/);
