@@ -47,7 +47,7 @@ async function runTicket({ ticket, arm, cfg, cal, probe, p, apiKey, limiter, sta
 
   while (attempt < DEFAULTS.max_attempts_per_ticket) {
     attempt++;
-    const messages = buildMessages(ticket, p.work, fixes);
+    const messages = buildMessages(ticket, p.work, fixes, state.runId);
     const body = buildBody({ model: cfg.model, messages, maxTokens, thinking: cfg.thinking, extraBody: cfg.extraBody });
     const est = tokensEstimate(promptChars(messages), charsPerToken);
     if (window && est + maxTokens + DEFAULTS.spare_tokens > window) {
@@ -146,7 +146,7 @@ async function main() {
   if (cal) updateMeta(run.dir, { calibration: { at: cal.at, n: cal.n, speed_tps_p10: cal.speed_tps_p10, answer_tokens_p95: cal.answer_tokens_p95 } });
   if (probe) updateMeta(run.dir, { probe: { at: probe.at, context_window: probe.context_window } });
   const limiter = createLimiter({ start: cfg.concurrency || 1, max: cfg.concurrency || 1, cleanMultiplier: DEFAULTS.aimd_clean_multiplier });
-  const state = { consecutive429: 0 };
+  const state = { consecutive429: 0, runId: run.id };
   const status = new Map([...latestByKey(p.tickets, (r) => r.ticket)].map(([k, v]) => [k, v.status]));
   let breaker = false;
   const running = new Map();
