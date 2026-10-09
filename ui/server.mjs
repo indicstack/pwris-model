@@ -3,7 +3,7 @@
 import { createServer } from "node:http";
 import { readFileSync, existsSync, mkdirSync, createReadStream, statSync, appendFileSync, openSync } from "node:fs";
 import { resolve, extname, normalize } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { ROOT, loadBrief } from "../lib/brief.mjs";
 import { readSettings, writeSettings, readProbe, calibrationPath, STATE_DIR } from "../lib/settings.mjs";
 import { writeKey, keyStatus, keyFor } from "../lib/keys.mjs";
@@ -12,9 +12,42 @@ import { loadTickets } from "../lib/prompt.mjs";
 import { readJsonl } from "../lib/jsonl.mjs";
 
 const PORT = 3900, HOST = "127.0.0.1";
+const CLAUDE_BIN = (spawnSync("zsh", ["-lc", "whence -p claude"], { encoding: "utf8" }).stdout || "").trim() || "claude";
+const REVIEW_PROMPT = "Read PROMPT-REVIEW.md in this folder and do exactly what it says. Write REVIEW.md here, then stop.";
 const jobs = new Map();
 const JOBS_DIR = resolve(STATE_DIR, "jobs");
 mkdirSync(JOBS_DIR, { recursive: true });
+
+function reviewInfo(runDir, meta) {
+  const folder = meta?.reviewFolder;
+  if (!folder || !existsSync(folder)) return { folder: null, done: false };
+  const reviewPath = resolve(folder, "REVIEW.md");
+  if (!existsSync(reviewPath)) return { folder, done: false };
+  const text = readFileSync(reviewPath, "utf8");
+  const verdictLine = (text.match(/^.*\b(PASS WITH FINDINGS|PASS|FAIL)\b.*$/m) || [""])[0].replace(/^[#*\s-]+/, "").trim();
+  const count = Number((verdictLine.match(/(\d+)/) || [])[1]);
+  if (Number.isFinite(count) && meta.reviewerCorrections == null) updateMeta(runDir, { reviewerCorrections: count, reviewVerdict: verdictLine });
+  return { folder, done: true, verdict: verdictLine, count: Number.isFinite(count) ? count : null };
+}
+
+function startReview(runId) {
+  const runDir = resolve(RUNS_DIR, runId);
+  let meta = JSON.parse(readFileSync(resolve(runDir, "meta.json"), "utf8"));
+  if (!meta.reviewFolder || !existsSync(meta.reviewFolder)) {
+    const r = spawnSync(process.execPath, [resolve(ROOT, "review/make-review.mjs"), "--run", runDir], { cwd: ROOT, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`make-review failed: ${r.stderr || r.stdout}`);
+    meta = JSON.parse(readFileSync(resolve(runDir, "meta.json"), "utf8"));
+  }
+  if (existsSync(resolve(meta.reviewFolder, "REVIEW.md"))) throw new Error("REVIEW.md already exists in " + meta.reviewFolder);
+  const id = `review-${runId}-${Date.now()}`;
+  const logPath = resolve(JOBS_DIR, `${id}.log`);
+  const fd = openSync(logPath, "a");
+  const child = spawn(CLAUDE_BIN, ["-p", REVIEW_PROMPT, "--model", "opus", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, env: { ...process.env, PWR_API_KEY: "" }, stdio: ["ignore", fd, fd] });
+  const job = { id, kind: "review", arm: meta.arm, runId, started: new Date().toISOString(), status: "running", exit: null, logPath, folder: meta.reviewFolder };
+  jobs.set(id, job);
+  child.on("exit", (code) => { job.status = code === 0 ? "done" : `exit ${code}`; job.exit = code; job.finished = new Date().toISOString(); });
+  return job;
+}
 
 function startJob(kind, arm, extraArgs = []) {
   const id = `${kind}-${arm}-${Date.now()}`;
@@ -42,7 +75,7 @@ function state() {
     const cal = existsSync(calibrationPath(arm)) ? JSON.parse(readFileSync(calibrationPath(arm), "utf8")) : null;
     arms[arm] = { ...settings[arm], probe: readProbe(arm), calibration: cal && { model: cal.model, at: cal.at, n: cal.n, n_ok: cal.n_ok, speed_tps_p10: cal.speed_tps_p10, chars_per_token_p10: cal.chars_per_token_p10, ttft_p95: cal.ttft_p95, gap_p99: cal.gap_p99, answer_tokens_p95: cal.answer_tokens_p95, answer_tokens_p95_by_ticket: cal.answer_tokens_p95_by_ticket, outcomes: cal.outcomes, schema_ok_rate: cal.schema_ok_rate } };
   }
-  return { brief, keys: keyStatus(), arms, tickets: loadTickets().map((t) => ({ id: t.id, title: t.title, deps: t.deps })), jobs: [...jobs.values()].sort((a, b) => b.started.localeCompare(a.started)).slice(0, 20), runs: listRuns().map((r) => ({ ...summarize(r.dir), kind: r.meta.kind || "run", queue: existsSync(resolve(r.dir, "claude-queue.jsonl")) ? readJsonl(resolve(r.dir, "claude-queue.jsonl")).length : 0 })) };
+  return { brief, keys: keyStatus(), arms, tickets: loadTickets().map((t) => ({ id: t.id, title: t.title, deps: t.deps })), jobs: [...jobs.values()].sort((a, b) => b.started.localeCompare(a.started)).slice(0, 20), runs: listRuns().map((r) => ({ ...summarize(r.dir), kind: r.meta.kind || "run", review: reviewInfo(r.dir, r.meta), reviewRunning: [...jobs.values()].some((j) => j.kind === "review" && j.runId === r.id && j.status === "running"), queue: existsSync(resolve(r.dir, "claude-queue.jsonl")) ? readJsonl(resolve(r.dir, "claude-queue.jsonl")).length : 0 })) };
 }
 
 const server = createServer(async (req, res) => {
@@ -71,6 +104,8 @@ const server = createServer(async (req, res) => {
     }
     const j = url.pathname.match(/^\/api\/jobs\/([^/]+)\/log$/);
     if (req.method === "GET" && j) { const job = jobs.get(decodeURIComponent(j[1])); if (!job) return json(res, 404, { error: "no job" }); res.writeHead(200, { "content-type": "text/plain" }); return res.end(readFileSync(job.logPath, "utf8").slice(-20000)); }
+    const rv = url.pathname.match(/^\/api\/runs\/([^/]+)\/review$/);
+    if (req.method === "POST" && rv) return json(res, 200, startReview(decodeURIComponent(rv[1])));
     const c = url.pathname.match(/^\/api\/runs\/([^/]+)\/corrections$/);
     if (req.method === "POST" && c) { const b = await body(req); updateMeta(resolve(RUNS_DIR, decodeURIComponent(c[1])), { reviewerCorrections: Number(b.corrections), reviewNote: String(b.note || "") }); return json(res, 200, { ok: true }); }
     const q = url.pathname.match(/^\/api\/runs\/([^/]+)\/queue$/);

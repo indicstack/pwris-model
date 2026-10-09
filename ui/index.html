@@ -21,7 +21,7 @@ button:disabled{opacity:.35;cursor:default} pre{background:#0a0c0d;color:#ddd;pa
 <table id="jobs"><thead><tr><th>Job</th><th>Status</th><th>Started</th><th>Log</th></tr></thead><tbody></tbody></table>
 <pre id="log" style="display:none"></pre>
 <h2>Results</h2>
-<table id="runs"><thead><tr><th>Run</th><th>Arm / model</th><th>Status</th><th>Wall s</th><th>Prompt tok</th><th>Completion tok</th><th>Cost</th><th>Passed first try</th><th>Retries</th><th>Reviewer corrections</th><th>Final tests</th><th>Outcomes</th><th>Queue</th><th></th></tr></thead><tbody></tbody></table>
+<table id="runs"><thead><tr><th>Run</th><th>Arm / model</th><th>Status</th><th>Wall s</th><th>Prompt tok</th><th>Completion tok</th><th>Cost</th><th>Passed first try</th><th>Retries</th><th>Review</th><th>Reviewer corrections</th><th>Final tests</th><th>Outcomes</th><th>Queue</th><th></th></tr></thead><tbody></tbody></table>
 <script>
 const $ = (s) => document.querySelector(s);
 let S = null, armsBuilt = false;
@@ -75,7 +75,7 @@ function render() {
   const jb = $("#jobs tbody"); jb.innerHTML = "";
   for (const j of S.jobs) jb.insertAdjacentHTML("beforeend", `<tr><td>${esc(j.id)}</td><td class="${j.status === "done" ? "ok" : j.status === "running" ? "" : "bad"}">${esc(j.status)}</td><td>${esc(j.started.slice(11, 19))}</td><td><button class="secondary" data-log="${esc(j.id)}">view</button></td></tr>`);
   const rb = $("#runs tbody"); rb.innerHTML = "";
-  for (const r of S.runs) rb.insertAdjacentHTML("beforeend", `<tr><td>${esc(r.id)}<br><span class="pill">${esc(r.kind)}</span></td><td>${esc(r.arm)} ${esc(r.model)}</td><td>${esc(r.status)}</td><td>${num(r.wall_s)}</td><td>${r.prompt_tokens}</td><td>${r.completion_tokens}${r.reasoning_tokens ? ` <span class="muted">(+${r.reasoning_tokens} reasoning)</span>` : ""}</td><td title="${esc(r.cost_source || "")}">${r.cost == null ? '<span class="muted">set $/M</span>' : num(r.cost, 4)}</td><td>${r.tickets_passed_first_try}/${r.tickets_total ?? "?"}</td><td>${r.retries}</td><td><input type="number" style="width:4rem" value="${esc(r.reviewer_corrections ?? "")}" data-corr="${esc(r.id)}"></td><td>${r.tests_final ? `${r.tests_final.pass} pass / ${r.tests_final.fail} fail` : ""}</td><td class="muted">${esc(Object.entries(r.outcomes).map(([k, v]) => `${k}:${v}`).join(" "))}</td><td>${r.queue ? `<span class="bad">${r.queue} for Claude</span>` : ""}</td><td>${r.kind === "run" ? `<a href="/play/${encodeURIComponent(r.id)}/index.html" target="_blank">play</a>` : ""}</td></tr>`);
+  for (const r of S.runs) rb.insertAdjacentHTML("beforeend", `<tr><td>${esc(r.id)}<br><span class="pill">${esc(r.kind)}</span></td><td>${esc(r.arm)} ${esc(r.model)}</td><td>${esc(r.status)}</td><td>${num(r.wall_s)}</td><td>${r.prompt_tokens}</td><td>${r.completion_tokens}${r.reasoning_tokens ? ` <span class="muted">(+${r.reasoning_tokens} reasoning)</span>` : ""}</td><td title="${esc(r.cost_source || "")}">${r.cost == null ? '<span class="muted">set $/M</span>' : num(r.cost, 4)}</td><td>${r.tickets_passed_first_try}/${r.tickets_total ?? "?"}</td><td>${r.retries}</td><td>${r.status === "void" ? "" : r.review?.done ? `<span class="ok">${esc(r.review.verdict || "written")}</span>` : r.reviewRunning ? '<span class="pill">reviewing…</span>' : r.status === "done" ? `<button class="secondary" data-review="${esc(r.id)}">Review</button>` : ""}</td><td><input type="number" style="width:4rem" value="${esc(r.reviewer_corrections ?? "")}" data-corr="${esc(r.id)}"></td><td>${r.tests_final ? `${r.tests_final.pass} pass / ${r.tests_final.fail} fail` : ""}</td><td class="muted">${esc(Object.entries(r.outcomes).map(([k, v]) => `${k}:${v}`).join(" "))}</td><td>${r.queue ? `<span class="bad">${r.queue} for Claude</span>` : ""}</td><td>${r.kind === "run" ? `<a href="/play/${encodeURIComponent(r.id)}/index.html" target="_blank">play</a>` : ""}</td></tr>`);
 }
 async function post(url, obj) { const r = await (await fetch(url, { method: "POST", body: JSON.stringify(obj) })).json(); if (r.error) alert(r.error); return r; }
 $("#adv").onchange = (e) => document.body.classList.toggle("show-adv", e.target.checked);
@@ -97,6 +97,8 @@ document.addEventListener("click", async (e) => {
     if (!confirm(msg + " Continue?")) return;
     await post(`/api/${act}/${arm}`, bodyObj); await load(); return;
   }
+  const rv = e.target.closest("button[data-review]");
+  if (rv) { if (!confirm("Start a blind review of this run in an isolated folder (one Claude Code session, a few minutes)?")) return; await post(`/api/runs/${encodeURIComponent(rv.dataset.review)}/review`, {}); await load(); return; }
   const l = e.target.closest("button[data-log]");
   if (l) { const t = await (await fetch(`/api/jobs/${encodeURIComponent(l.dataset.log)}/log`)).text(); $("#log").style.display = "block"; $("#log").textContent = t; $("#log").scrollTop = 1e9; }
 });
