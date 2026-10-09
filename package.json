@@ -1,0 +1,12 @@
+{
+  "name": "pwr-bench",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Planner-worker-reviewer harness: Flappy Bird three ways. Node built-ins only.",
+  "scripts": {
+    "ui": "node ui/server.mjs",
+    "test": "node --test tests/client.test.mjs tests/worker.test.mjs",
+    "stub": "node stub/stub.mjs 3901",
+    "freeze": "node scripts/freeze-brief.mjs"
+  }
+}

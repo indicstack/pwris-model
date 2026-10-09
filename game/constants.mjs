@@ -1,0 +1,19 @@
+// Harness-owned. Values are copied from BRIEF.md "Constants". Do not edit here; change the brief version.
+export const CANVAS_W = 400;
+export const CANVAS_H = 600;
+export const GROUND_HEIGHT = 80;
+export const GROUND_Y = 520;
+export const BIRD_X = 80;
+export const BIRD_W = 34;
+export const BIRD_H = 24;
+export const BIRD_START_Y = 250;
+export const GRAVITY = 1200;
+export const FLAP_VY = -380;
+export const PIPE_SPEED = 120;
+export const PIPE_W = 60;
+export const GAP_H = 150;
+export const GAP_MIN_Y = 60;
+export const GAP_MAX_Y = 310;
+export const SPAWN_INTERVAL = 1.6;
+export const MAX_DT = 0.05;
+export const BEST_KEY = "flappy.best";

@@ -1,0 +1,90 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pwr-bench</title>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;color:#2b2e33;background:#f5f5f2;margin:0;padding:1.5rem}
+h1{font-size:1.3rem;margin:0 0 .25rem} h2{font-size:1rem;margin:1.5rem 0 .5rem} .muted{color:#6b7076;font-size:.85rem}
+table{border-collapse:collapse;width:100%;background:#fff} th,td{border:1px solid #e6e6e3;padding:.4rem .5rem;text-align:left;vertical-align:top;font-size:.85rem}
+th{background:#fafaf8;font-weight:600} input[type=text],input[type=number],input[type=password]{width:100%;box-sizing:border-box;padding:.3rem;border:1px solid #ccc;border-radius:3px;font-size:.85rem}
+button{padding:.35rem .7rem;border:1px solid #b84500;background:#ff6602;color:#fff;border-radius:3px;cursor:pointer;font-size:.8rem;margin-right:.25rem} button.secondary{background:#fff;color:#b84500}
+button:disabled{opacity:.4;cursor:default} pre{background:#0a0c0d;color:#ddd;padding:.75rem;font-size:.75rem;max-height:320px;overflow:auto;white-space:pre-wrap}
+.ok{color:#1a7f37}.bad{color:#b42318}.pill{display:inline-block;padding:0 .4rem;border-radius:8px;background:#fff1e6;color:#b84500;font-size:.75rem}
+</style></head><body>
+<h1>pwr-bench <span class="muted">planner-worker-reviewer, Flappy Bird</span></h1>
+<div class="muted" id="brief"></div>
+<div class="muted" id="keys"></div>
+<h2>Arms</h2>
+<table id="arms"><thead><tr><th>Arm</th><th>Base URL</th><th>Model</th><th>API key</th><th>Conc.</th><th>Thinking</th><th>Max tokens</th><th>$/M in</th><th>$/M out</th><th>Calib. calls</th><th>Probe</th><th>Calibration</th><th>Actions</th></tr></thead><tbody></tbody></table>
+<div style="margin-top:.5rem"><button id="save">Save settings</button> <span class="muted">Keys are written to ~/.pwr/keys.env (mode 600) and never shown again.</span></div>
+<h2>Jobs</h2>
+<table id="jobs"><thead><tr><th>Job</th><th>Status</th><th>Started</th><th>Log</th></tr></thead><tbody></tbody></table>
+<pre id="log" style="display:none"></pre>
+<h2>Results</h2>
+<table id="runs"><thead><tr><th>Run</th><th>Arm / model</th><th>Status</th><th>Wall s</th><th>Prompt tok</th><th>Completion tok</th><th>Cost</th><th>Passed first try</th><th>Retries</th><th>Reviewer corrections</th><th>Final tests</th><th>Outcomes</th><th>Queue</th><th></th></tr></thead><tbody></tbody></table>
+<script>
+const $ = (s) => document.querySelector(s);
+let S = null;
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const num = (v, d = 0) => (v == null || Number.isNaN(v) ? "" : Number(v).toFixed(d));
+async function load() { S = await (await fetch("/api/state")).json(); render(); }
+function render() {
+  $("#brief").textContent = S.brief.ok ? `BRIEF.md frozen, sha256 ${S.brief.hash.slice(0, 16)}…  ·  ${S.tickets.length} tickets` : `BRIEF: ${S.brief.error}`;
+  $("#keys").textContent = `keys file ${S.keys.path} mode ${S.keys.mode || "(none)"}; saved for: ${Object.entries(S.keys.has).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"}`;
+  const tb = $("#arms tbody"); tb.innerHTML = "";
+  for (const arm of ["A", "B", "C"]) {
+    const a = S.arms[arm]; const api = a.mode !== "claude";
+    const probe = a.probe ? `window ${a.probe.context_window ?? "?"}<br><span class="muted">${(a.probe.at || "").slice(0, 16)}; thinking off ${a.probe.thinking_off_works}; schema ${a.probe.steps?.find((s) => s.step === "one_call")?.schema_honoured}</span>` : "";
+    const cal = a.calibration ? `n=${a.calibration.n_ok}/${a.calibration.n}, ${num(a.calibration.speed_tps_p10, 1)} tps p10, ${num(a.calibration.chars_per_token_p10, 2)} c/t, ttft p95 ${num(a.calibration.ttft_p95, 1)}s, ans p95 ${a.calibration.answer_tokens_p95}<br><span class="muted">${a.calibration.model === a.model ? "" : "STALE MODEL: "}${(a.calibration.at || "").slice(0, 16)}</span>` : "";
+    tb.insertAdjacentHTML("beforeend", `<tr data-arm="${arm}">
+      <td><b>${esc(a.label)}</b><br><span class="pill">${a.mode}</span></td>
+      <td><input type="text" name="baseUrl" value="${esc(a.baseUrl)}" ${api ? "" : "disabled"}></td>
+      <td><input type="text" name="model" value="${esc(a.model)}" placeholder="${esc(a.modelHint || "")}" ${api ? "" : "disabled"}></td>
+      <td><input type="password" name="apiKey" placeholder="${S.keys.has[arm] ? "saved" : "paste key"}" autocomplete="off" ${api ? "" : "disabled"}></td>
+      <td><input type="number" name="concurrency" min="1" value="${esc(a.concurrency)}" ${api ? "" : "disabled"}></td>
+      <td><input type="checkbox" name="thinking" ${a.thinking ? "checked" : ""} ${api ? "" : "disabled"}></td>
+      <td><input type="number" name="maxTokens" value="${esc(a.maxTokens ?? "")}" placeholder="from calibration" ${api ? "" : "disabled"}></td>
+      <td><input type="number" name="priceInPerM" step="any" value="${esc(a.priceInPerM ?? "")}"></td>
+      <td><input type="number" name="priceOutPerM" step="any" value="${esc(a.priceOutPerM ?? "")}"></td>
+      <td><input type="number" name="calibrationCalls" value="${esc(a.calibrationCalls ?? "")}" ${api ? "" : "disabled"}></td>
+      <td>${probe}</td><td>${cal}</td>
+      <td><button data-act="probe" ${api ? "" : "disabled"}>Probe</button><button data-act="calibrate" ${api ? "" : "disabled"}>Calibrate</button><button data-act="run">Run</button></td></tr>`);
+  }
+  const jb = $("#jobs tbody"); jb.innerHTML = "";
+  for (const j of S.jobs) jb.insertAdjacentHTML("beforeend", `<tr><td>${esc(j.id)}</td><td class="${j.status === "done" ? "ok" : j.status === "running" ? "" : "bad"}">${esc(j.status)}</td><td>${esc(j.started.slice(11, 19))}</td><td><button class="secondary" data-log="${esc(j.id)}">view</button></td></tr>`);
+  const rb = $("#runs tbody"); rb.innerHTML = "";
+  for (const r of S.runs) rb.insertAdjacentHTML("beforeend", `<tr><td>${esc(r.id)}<br><span class="pill">${esc(r.kind)}</span></td><td>${esc(r.arm)} ${esc(r.model)}</td><td>${esc(r.status)}</td><td>${num(r.wall_s)}</td><td>${r.prompt_tokens}</td><td>${r.completion_tokens}${r.reasoning_tokens ? ` <span class="muted">(+${r.reasoning_tokens} reasoning)</span>` : ""}</td><td>${r.cost == null ? '<span class="muted">set $/M</span>' : num(r.cost, 4)}</td><td>${r.tickets_passed_first_try}/${r.tickets_total ?? "?"}</td><td>${r.retries}</td><td><input type="number" style="width:4rem" value="${esc(r.reviewer_corrections ?? "")}" data-corr="${esc(r.id)}"></td><td>${r.tests_final ? `${r.tests_final.pass} pass / ${r.tests_final.fail} fail` : ""}</td><td class="muted">${esc(Object.entries(r.outcomes).map(([k, v]) => `${k}:${v}`).join(" "))}</td><td>${r.queue ? `<span class="bad">${r.queue} for Claude</span>` : ""}</td><td>${r.kind === "run" ? `<a href="/play/${encodeURIComponent(r.id)}/index.html" target="_blank">play</a>` : ""}</td></tr>`);
+}
+$("#save").onclick = async () => {
+  const patch = {};
+  for (const tr of document.querySelectorAll("#arms tbody tr")) {
+    const arm = tr.dataset.arm; const o = {};
+    for (const inp of tr.querySelectorAll("input")) {
+      if (inp.disabled) continue;
+      if (inp.type === "checkbox") o[inp.name] = inp.checked;
+      else if (inp.type === "number") o[inp.name] = inp.value === "" ? null : Number(inp.value);
+      else if (inp.name === "apiKey") { if (inp.value) o.apiKey = inp.value; }
+      else o[inp.name] = inp.value.trim();
+    }
+    patch[arm] = o;
+  }
+  const r = await (await fetch("/api/settings", { method: "POST", body: JSON.stringify(patch) })).json();
+  if (r.error) alert(r.error); await load();
+};
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (b) {
+    const arm = b.closest("tr").dataset.arm, act = b.dataset.act; const bodyObj = {};
+    if (act === "probe" && !S.arms[arm].model) bodyObj.findModel = S.arms[arm].modelHint || "";
+    if (act === "calibrate" && !confirm(`Calibrate arm ${arm}: about ${S.arms[arm].calibrationCalls} real calls. Continue?`)) return;
+    if (act === "run" && !confirm(`Run all ${S.tickets.length} tickets for arm ${arm}${S.arms[arm].mode === "claude" ? " (no API calls; queues for the Claude session)" : " (real calls)"}. Continue?`)) return;
+    if (act === "probe" && !confirm(`Probe arm ${arm}: one real call plus a max_tokens ladder. Continue?`)) return;
+    const r = await (await fetch(`/api/${act}/${arm}`, { method: "POST", body: JSON.stringify(bodyObj) })).json();
+    if (r.error) alert(r.error); await load(); return;
+  }
+  const l = e.target.closest("button[data-log]");
+  if (l) { const t = await (await fetch(`/api/jobs/${encodeURIComponent(l.dataset.log)}/log`)).text(); $("#log").style.display = "block"; $("#log").textContent = t; $("#log").scrollTop = 1e9; }
+});
+document.addEventListener("change", async (e) => {
+  if (e.target.dataset.corr) { await fetch(`/api/runs/${encodeURIComponent(e.target.dataset.corr)}/corrections`, { method: "POST", body: JSON.stringify({ corrections: e.target.value }) }); }
+});
+load(); setInterval(() => { if (!document.activeElement || document.activeElement.tagName !== "INPUT") load(); }, 4000);
+</script></body></html>

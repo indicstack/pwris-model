@@ -1,0 +1,6 @@
+{
+  "_source": "PROMPT-SETUP.md 'Arms' (9 Oct 2026). Prices and concurrency are blank until the owner enters them in the UI; Probe fills the OpenRouter model id and prices from its /models listing.",
+  "A": { "label": "A: IndicStack", "baseUrl": "https://api.indicstack.ai/v1", "model": "qwen38-27b", "thinking": false, "concurrency": 1, "maxTokens": null, "priceInPerM": null, "priceOutPerM": null, "calibrationCalls": 48, "mode": "api" },
+  "B": { "label": "B: Opus 5.5 alone", "baseUrl": "", "model": "Opus 5.5 (Claude Code session, no worker call)", "thinking": null, "concurrency": 1, "maxTokens": null, "priceInPerM": null, "priceOutPerM": null, "calibrationCalls": 0, "mode": "claude" },
+  "C": { "label": "C: OpenRouter", "baseUrl": "https://openrouter.ai/api/v1", "model": "", "modelHint": "Qwen 3.8 27B (probe /models to find its id)", "thinking": false, "concurrency": 1, "maxTokens": null, "priceInPerM": null, "priceOutPerM": null, "calibrationCalls": 48, "mode": "api" }
+}
