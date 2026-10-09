@@ -24,13 +24,13 @@ export function syntaxCheck(absPath) {
 }
 
 export function runTest(testRel, workDir, timeoutS = DEFAULTS.test_timeout_s) {
-  const r = spawnSync(process.execPath, ["--test", resolve(ROOT, testRel)], {
+  const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", resolve(ROOT, testRel)], {
     cwd: ROOT, encoding: "utf8", timeout: timeoutS * 1000,
-    env: { ...process.env, PWR_WORK: workDir, NODE_TEST_CONTEXT: undefined, NODE_OPTIONS: undefined },
+    env: { ...process.env, PWR_WORK: workDir, NODE_TEST_CONTEXT: undefined, NODE_OPTIONS: undefined, FORCE_COLOR: undefined, NO_COLOR: "1" },
   });
-  const out = (r.stdout || "") + (r.stderr || "");
-  const pass = Number((out.match(/^# pass (\d+)/m) || [])[1] ?? 0);
-  const fail = Number((out.match(/^# fail (\d+)/m) || [])[1] ?? 0);
+  const out = ((r.stdout || "") + (r.stderr || "")).replace(/\x1b\[[0-9;]*m/g, "");
+  const count = (name) => Number((out.match(new RegExp(`^(?:# |\\u2139 )${name} (\\d+)`, "m")) || [])[1] ?? 0);
+  const pass = count("pass"), fail = count("fail");
   const noTests = pass === 0 && fail === 0;
   return { ok: r.status === 0 && fail === 0 && !r.error && !noTests, pass, fail, output: (noTests ? "no tests ran\n" : "") + out.slice(-6000), timedOut: Boolean(r.error) };
 }
