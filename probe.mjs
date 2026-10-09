@@ -69,7 +69,9 @@ async function main() {
     say(`ladder max_tokens=${mt}: ${r.kind} http=${r.status}${r.error ? " " + r.error.slice(0, 160).replace(/\s+/g, " ") : ""}`);
     if (r.kind === "ok" || r.kind === "length" || r.kind === "empty_content") { accepted = mt; continue; }
     refusedAt = mt; refusedText = r.error;
-    if (nums.length) parsedWindow = Math.max(...nums);
+    const stated = (r.error || "").match(/context length (?:is|of) (\d[\d,]*)/i);
+    if (stated) parsedWindow = Number(stated[1].replace(/,/g, ""));
+    else if (nums.length) parsedWindow = Math.min(...nums);
     break;
   }
   out.ladder = { largest_accepted: accepted, refused_at: refusedAt, refused_text: refusedText?.slice(0, 500) || null, window_from_error: parsedWindow };
