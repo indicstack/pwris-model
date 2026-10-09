@@ -54,7 +54,8 @@ async function preflight() {
   if (!fresh) { say("probe: running (one call + max_tokens ladder)"); const r = node("probe.mjs", ["--arm", "A"], { env: { PWR_API_KEY: key } }); if (r.status !== 0) die("probe failed"); } else say(`probe: fresh (${probe.at.slice(0, 16)}, window ${probe.context_window})`);
   const cal = readJson(resolve(pwr, "state", "calibration-A.json"));
   const model = (await import("../lib/settings.mjs")).armConfig("A").model;
-  if (!cal || cal.model !== model) { const n = Number(args.calls || 48); say(`calibration: running ${n} calls for ${model}`); const r = node("calibrate.mjs", ["--arm", "A", "--calls", String(n)], { env: { PWR_API_KEY: key } }); if (r.status !== 0) die("calibration failed"); } else say(`calibration: present for ${model} (${cal.at.slice(0, 16)})`);
+  if (args.calibrate) { const n = Number(args.calls || 48); say(`calibration: running ${n} calls for ${model}`); const r = node("calibrate.mjs", ["--arm", "A", "--calls", String(n)], { env: { PWR_API_KEY: key } }); if (r.status !== 0) die("calibration failed"); }
+  else say(cal && cal.model === model ? `calibration: from ${cal.source || "calibration run"} ${cal.at.slice(0, 16)} (${cal.n_measured ?? cal.n_ok} calls)` : "calibration: none yet; first run uses defaults and then calibrates itself from its own calls");
   say("preflight ok");
 }
 
@@ -65,6 +66,9 @@ async function run() {
   if (r.status !== 0) die(`worker exited ${r.status}`);
   const meta = readJson(resolve(lastRun(), "meta.json"));
   say(`run ${meta.id}: ${meta.status}, final tests ${JSON.stringify(meta.testsFinal)}`);
+  // self-calibration: recompute speed, chars/token and answer budgets from this run's own calls
+  const rc = node("calibrate.mjs", ["--arm", "A", "--recompute", lastRun(), "--source", `run ${meta.id}`], { env: { PWR_API_KEY: key }, quiet: true });
+  say(rc.status === 0 ? "calibration updated from this run" : `calibration not updated: ${(rc.stderr || rc.stdout).slice(0, 200)}`);
   if (meta.status === "needs_claude") say(`tickets queued for the planner: see ${resolve(lastRun(), "claude-queue.jsonl")}. Submit each with: node ${resolve(HOME, "check.mjs")} --run <run> --ticket N --files <json> (PWR_PROJECT set).`);
 }
 

@@ -1,7 +1,7 @@
 // Calibration pilot: ~N real ticket prompts, measures speed, chars/token, ttft, gaps, answer length per ticket.
 //   node calibrate.mjs --arm A [--calls 48]
-import { writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
 import { loadBrief } from "./lib/brief.mjs";
 import { armConfig, calibrationPath, readProbe, DEFAULTS } from "./lib/settings.mjs";
 import { loadTickets, buildMessages, buildBody, promptChars } from "./lib/prompt.mjs";
@@ -19,10 +19,10 @@ const apiKey = process.env.PWR_API_KEY || "";
 if (!apiKey) { console.error("PWR_API_KEY missing"); process.exit(2); }
 const brief = loadBrief();
 const probe = readProbe(arm);
-if (!probe?.context_window) { console.error("probe first: calibration sizes max_tokens from the served window"); process.exit(2); }
+if (!args.recompute && !probe?.context_window) { console.error("probe first: calibration sizes max_tokens from the served window"); process.exit(2); }
 const tickets = loadTickets();
 const n = Number(args.calls || cfg.calibrationCalls || 0);
-if (!n) { console.error("calibration calls is 0"); process.exit(2); }
+if (!n && !args.recompute) { console.error("calibration calls is 0"); process.exit(2); }
 const recompute = args.recompute ? resolve(process.cwd(), String(args.recompute)) : null;
 const run = recompute ? { id: recompute.split("/").pop(), dir: recompute } : newRunDir(arm, "calibrate");
 const p = runPaths(run.dir);
@@ -58,11 +58,11 @@ function finish(status) {
   const cacheHits = okAll.filter(isCacheHit);
   const ok = okAll.filter((r) => !isCacheHit(r));
   const speeds = ok.filter((r) => r.write_s > 0).map((r) => r.completion_tokens / r.write_s);
-  const cpt = ok.map((r) => r.prompt_chars / r.prompt_tokens);
+  const cpt = ok.filter((r) => r.prompt_chars).map((r) => r.prompt_chars / r.prompt_tokens);
   const byTicket = {};
   for (const t of tickets) { const v = ok.filter((r) => r.ticket === t.id).map((r) => r.completion_tokens); if (v.length) byTicket[t.id] = percentile(v, 95); }
   const cal = {
-    model: cfg.model, arm, baseUrl: cfg.baseUrl, at: new Date().toISOString(), run: run.id, n: rows.length, n_ok: ok.length, status,
+    model: cfg.model, arm, baseUrl: cfg.baseUrl, at: new Date().toISOString(), run: run.id, source: args.source ? String(args.source) : "calibration run", n: rows.length, n_ok: ok.length, status,
     outcomes: rows.reduce((a, r) => { a[r.kind] = (a[r.kind] || 0) + 1; return a; }, {}),
     speed_tps_p10: percentile(speeds, 10), speed_tps_p50: percentile(speeds, 50),
     chars_per_token_p10: percentile(cpt, 10), chars_per_token_p50: percentile(cpt, 50),
@@ -73,9 +73,10 @@ function finish(status) {
     reasoning_tokens_total: rows.reduce((a, r) => a + (r.reasoning_tokens || 0), 0),
     planner_notes: [],
   };
+  mkdirSync(dirname(calibrationPath(arm)), { recursive: true });
   writeFileSync(calibrationPath(arm), JSON.stringify(cal, null, 2) + "\n");
   updateMeta(run.dir, { status, finished: new Date().toISOString(), calibration: cal, cost: rows.reduce((a, r) => a + (r.cost || 0), 0) });
   say(`calibration written to ${calibrationPath(arm)}: speed p10 ${cal.speed_tps_p10?.toFixed?.(1)} tps, chars/token p10 ${cal.chars_per_token_p10?.toFixed?.(2)}, answer p95 ${cal.answer_tokens_p95}`);
 }
-if (recompute) { rows.push(...(await import("./lib/jsonl.mjs")).readJsonl(p.calls)); finish("done"); }
+if (recompute) { rows.push(...(await import("./lib/jsonl.mjs")).readJsonl(p.calls).filter((r) => r.stage === "worker" || r.stage === "calibrate").map((r) => ({ ...r, write_s: r.write_s ?? (r.ttft != null ? r.seconds - r.ttft : null), prompt_chars: r.prompt_chars ?? null, schema_ok: r.schema_ok ?? (r.kind === "ok") }))); finish("done"); }
 else { const jobs = []; for (let i = 0; i < n; i++) jobs.push(one(i)); await Promise.all(jobs); finish("done"); }

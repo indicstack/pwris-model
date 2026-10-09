@@ -29,5 +29,7 @@
   "test_timeout_s": 60,
   "_test_timeout_s": "planner choice, 9 Oct 2026: node --test per ticket",
   "cache_hit_tps_threshold": 1000,
-  "_cache_hit_tps_threshold": "planner choice, 9 Oct 2026: a call that 'wrote' faster than this many tokens/s is a server response-cache hit (the 48-call arm A calibration showed 42 such calls at >10,000 tok/s); excluded from speed, ttft and gap statistics, counted separately"
+  "_cache_hit_tps_threshold": "planner choice, 9 Oct 2026: a call that 'wrote' faster than this many tokens/s is a server response-cache hit (the 48-call arm A calibration showed 42 such calls at >10,000 tok/s); excluded from speed, ttft and gap statistics, counted separately",
+  "first_run_answer_tokens": 2048,
+  "_first_run_answer_tokens": "planner choice, 9 Oct 2026: max_tokens for a ticket when no calibration exists yet; the 'length' outcome doubles it once. After each run the calibration is recomputed from the run's own calls, so this only applies to a model's first run."
 }

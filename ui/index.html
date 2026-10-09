@@ -35,8 +35,7 @@ function nextFor(arm) {
   if (!S.keys.has[arm]) return { act: null, label: "paste key, press Save" };
   if (!a.model) return { act: "probe", label: "Probe (finds model id)" };
   if (!a.probe?.context_window) return { act: "probe", label: "Probe" };
-  if (!a.calibration || a.calibration.model !== a.model) return { act: "calibrate", label: `Calibrate (~${a.calibrationCalls} calls)` };
-  return { act: "run", label: "Run" };
+  return { act: "run", label: (!a.calibration || a.calibration.model !== a.model) ? "Run (self-calibrates)" : "Run" };
 }
 function buildArms() {
   const tb = $("#arms tbody"); tb.innerHTML = "";
@@ -71,7 +70,7 @@ function render() {
     tr.querySelector(".next-cell").innerHTML = running ? `<span class="pill">${esc(running.kind)} running…</span>` : n.act ? `<button data-act="${n.act}">${esc(n.label)}</button>` : `<span class="small">${esc(n.label)}</span>`;
     if (api(arm) && !S.keys.has[arm]) todo.push(`arm ${arm}: paste key and press Save`);
   }
-  $("#steps").innerHTML = todo.length ? `<b>Next:</b> ${todo.join("; ")}.` : `<b>Keys saved.</b> Each arm's "Do next" button is the only one to press; order is Probe → Calibrate → Run. Ask Claude before pressing, since Probe/Calibrate/Run cost real calls.`;
+  $("#steps").innerHTML = todo.length ? `<b>Next:</b> ${todo.join("; ")}.` : `<b>Keys saved.</b> Each arm's "Do next" button is the only one to press; order is Probe → Run (Calibrate is optional; each run recalibrates from its own calls). Ask Claude before pressing, since Probe/Calibrate/Run cost real calls.`;
   const jb = $("#jobs tbody"); jb.innerHTML = "";
   for (const j of S.jobs) jb.insertAdjacentHTML("beforeend", `<tr><td>${esc(j.id)}</td><td class="${j.status === "done" ? "ok" : j.status === "running" ? "" : "bad"}">${esc(j.status)}</td><td>${esc(j.started.slice(11, 19))}</td><td><button class="secondary" data-log="${esc(j.id)}">view</button></td></tr>`);
   const rb = $("#runs tbody"); rb.innerHTML = "";
