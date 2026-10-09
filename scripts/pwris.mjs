@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 
 import { resolve } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { HOME } from "../lib/paths.mjs";
+import { runClaude } from "../lib/claude-bin.mjs";
 
 const args = Object.fromEntries(process.argv.slice(3).map((a, i, arr) => a.startsWith("--") ? [a.slice(2), arr[i + 1] ?? true] : []).filter((x) => x.length));
 const cmd = process.argv[2];
@@ -38,6 +39,8 @@ async function status() {
 }
 
 async function preflight() {
+  const major = Number(process.versions.node.split(".")[0]);
+  if (major < 18) die(`Node ${process.versions.node} is too old; install Node 18 or later.`);
   mkdirSync(resolve(pwr, "state"), { recursive: true });
   const gi = resolve(project, ".gitignore"); const want = [".pwr/runs/", ".pwr/state/"];
   const cur = existsSync(gi) ? readFileSync(gi, "utf8") : "";
@@ -78,9 +81,8 @@ async function review() {
   if (mk.status !== 0) die(mk.stderr || mk.stdout);
   const meta = readJson(resolve(run, "meta.json"));
   say(`review folder: ${meta.reviewFolder}`);
-  const claude = (spawnSync("zsh", ["-lc", "whence -p claude"], { encoding: "utf8" }).stdout || "").trim() || "claude";
   const t0 = Date.now();
-  const r = spawnSync(claude, ["-p", "Read PROMPT-REVIEW.md in this folder and do exactly what it says. Write REVIEW.md here, then stop.", "--model", String(args.model || "opus"), "--output-format", "json", "--no-session-persistence", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, encoding: "utf8", maxBuffer: 50e6, env: { ...process.env, PWR_API_KEY: "" } });
+  const r = runClaude(["-p", "--model", String(args.model || "opus"), "--output-format", "json", "--no-session-persistence", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, input: "Read PROMPT-REVIEW.md in this folder and do exactly what it says. Write REVIEW.md here, then stop.", env: { ...process.env, PWR_API_KEY: "" } });
   let j = null; try { j = JSON.parse(r.stdout.trim().split("\n").filter((l) => l.startsWith("{")).pop()); } catch {}
   const u = j?.usage || {};
   const text = existsSync(resolve(meta.reviewFolder, "REVIEW.md")) ? readFileSync(resolve(meta.reviewFolder, "REVIEW.md"), "utf8") : "";

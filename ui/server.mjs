@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync, mkdirSync, createReadStream, statSync, appendFileSync, openSync } from "node:fs";
 import { resolve, extname, normalize } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
+import { spawnClaude } from "../lib/claude-bin.mjs";
 import { ROOT, loadBrief } from "../lib/brief.mjs";
 import { readSettings, writeSettings, readProbe, calibrationPath, STATE_DIR } from "../lib/settings.mjs";
 import { writeKey, keyStatus, keyFor } from "../lib/keys.mjs";
@@ -12,7 +13,6 @@ import { loadTickets } from "../lib/prompt.mjs";
 import { readJsonl } from "../lib/jsonl.mjs";
 
 const PORT = 3900, HOST = "127.0.0.1";
-const CLAUDE_BIN = (spawnSync("zsh", ["-lc", "whence -p claude"], { encoding: "utf8" }).stdout || "").trim() || "claude";
 const REVIEW_PROMPT = "Read PROMPT-REVIEW.md in this folder and do exactly what it says. Write REVIEW.md here, then stop.";
 const jobs = new Map();
 const JOBS_DIR = resolve(STATE_DIR, "jobs");
@@ -47,7 +47,7 @@ function startReview(runId, force = false) {
   const id = `review-${runId}-${Date.now()}`;
   const logPath = resolve(JOBS_DIR, `${id}.log`);
   const fd = openSync(logPath, "a");
-  const child = spawn(CLAUDE_BIN, ["-p", REVIEW_PROMPT, "--model", "opus", "--output-format", "json", "--no-session-persistence", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, env: { ...process.env, PWR_API_KEY: "" }, stdio: ["ignore", fd, fd] });
+  const child = spawn(...spawnClaude(["-p", REVIEW_PROMPT, "--model", "opus", "--output-format", "json", "--no-session-persistence", "--allowedTools", "Read", "Write", "Glob", "Grep"], { cwd: meta.reviewFolder, env: { ...process.env, PWR_API_KEY: "" }, stdio: ["ignore", fd, fd] }));
   const job = { id, kind: "review", arm: meta.arm, runId, started: new Date().toISOString(), status: "running", exit: null, logPath, folder: meta.reviewFolder };
   jobs.set(id, job);
   child.on("exit", (code) => {

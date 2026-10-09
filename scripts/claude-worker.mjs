@@ -1,6 +1,8 @@
 // Arm B as a headless Opus worker: the exact worker prompts, one `claude -p` call per ticket, exact usage from its JSON output.
 //   node scripts/claude-worker.mjs [--run runs/<id>]
-import { spawnSync } from "node:child_process";
+import { runClaude } from "../lib/claude-bin.mjs";
+import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
 import { resolve } from "node:path";
 import { writeFileSync } from "node:fs";
 import { ROOT, loadBrief } from "../lib/brief.mjs";
@@ -11,7 +13,6 @@ import { appendJsonl } from "../lib/jsonl.mjs";
 import { applyAndCheck, recordTicket, enqueueForClaude, finalTestCount } from "../check.mjs";
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith("--") ? [a.slice(2), arr[i + 1] ?? true] : []).filter((x) => x.length));
-const CLAUDE = (spawnSync("zsh", ["-lc", "whence -p claude"], { encoding: "utf8" }).stdout || "").trim() || "claude";
 const MODEL = String(args.model || "opus");
 const brief = loadBrief();
 const tickets = loadTickets();
@@ -30,7 +31,8 @@ for (const t of tickets.filter((t) => true).sort((a, b) => a.id - b.id)) {
   for (let attempt = 1; attempt <= 2 && !done; attempt++) {
     const [sys, user] = buildMessages(t, p.work, fixes, runId);
     const t0 = Date.now();
-    const r = spawnSync(CLAUDE, ["-p", user.content, "--system-prompt", sys.content, "--model", MODEL, "--output-format", "json", "--no-session-persistence", "--allowedTools", ""], { cwd: p.work, encoding: "utf8", maxBuffer: 50e6, env: { ...process.env, PWR_API_KEY: "" } });
+    const tmp = mkdtempSync(resolve(tmpdir(), "pwr-sys-")); const sysFile = resolve(tmp, "system.txt"); writeFileSync(sysFile, sys.content);
+    const r = runClaude(["-p", "--system-prompt-file", sysFile, "--model", MODEL, "--output-format", "json", "--no-session-persistence", "--allowedTools", ""], { cwd: p.work, input: user.content, env: { ...process.env, PWR_API_KEY: "" } });
     const seconds = (Date.now() - t0) / 1000;
     let j = null; try { j = JSON.parse(r.stdout); } catch {}
     const text = j?.result ?? "";
