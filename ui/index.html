@@ -3,18 +3,20 @@
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;color:#2b2e33;background:#f5f5f2;margin:0;padding:1.5rem}
 h1{font-size:1.3rem;margin:0 0 .25rem} h2{font-size:1rem;margin:1.5rem 0 .5rem} .muted{color:#6b7076;font-size:.85rem}
-table{border-collapse:collapse;width:100%;background:#fff} th,td{border:1px solid #e6e6e3;padding:.4rem .5rem;text-align:left;vertical-align:top;font-size:.85rem}
-th{background:#fafaf8;font-weight:600} input[type=text],input[type=number],input[type=password]{width:100%;box-sizing:border-box;padding:.3rem;border:1px solid #ccc;border-radius:3px;font-size:.85rem}
-button{padding:.35rem .7rem;border:1px solid #b84500;background:#ff6602;color:#fff;border-radius:3px;cursor:pointer;font-size:.8rem;margin-right:.25rem} button.secondary{background:#fff;color:#b84500}
-button:disabled{opacity:.4;cursor:default} pre{background:#0a0c0d;color:#ddd;padding:.75rem;font-size:.75rem;max-height:320px;overflow:auto;white-space:pre-wrap}
-.ok{color:#1a7f37}.bad{color:#b42318}.pill{display:inline-block;padding:0 .4rem;border-radius:8px;background:#fff1e6;color:#b84500;font-size:.75rem}
+table{border-collapse:collapse;width:100%;background:#fff} th,td{border:1px solid #e6e6e3;padding:.5rem .6rem;text-align:left;vertical-align:middle;font-size:.9rem}
+th{background:#fafaf8;font-weight:600} input[type=text],input[type=number],input[type=password]{box-sizing:border-box;padding:.35rem;border:1px solid #ccc;border-radius:3px;font-size:.9rem}
+button{padding:.4rem .8rem;border:1px solid #b84500;background:#ff6602;color:#fff;border-radius:3px;cursor:pointer;font-size:.85rem;margin-right:.3rem} button.secondary{background:#fff;color:#b84500}
+button:disabled{opacity:.35;cursor:default} pre{background:#0a0c0d;color:#ddd;padding:.75rem;font-size:.75rem;max-height:320px;overflow:auto;white-space:pre-wrap}
+.ok{color:#1a7f37;font-weight:600}.bad{color:#b42318}.pill{display:inline-block;padding:0 .4rem;border-radius:8px;background:#fff1e6;color:#b84500;font-size:.75rem}
+.steps{background:#fff1e6;border-left:3px solid #ff6602;padding:.6rem .9rem;margin:1rem 0;font-size:.95rem}
+.adv{display:none}.show-adv .adv{display:table-cell} .small{font-size:.8rem;color:#6b7076}
 </style></head><body>
-<h1>pwr-bench <span class="muted">planner-worker-reviewer, Flappy Bird</span></h1>
+<h1>pwr-bench <span class="muted">Flappy Bird, three ways</span></h1>
 <div class="muted" id="brief"></div>
-<div class="muted" id="keys"></div>
-<h2>Arms</h2>
-<table id="arms"><thead><tr><th>Arm</th><th>Base URL</th><th>Model</th><th>API key</th><th>Conc.</th><th>Thinking</th><th>Max tokens</th><th>$/M in</th><th>$/M out</th><th>Calib. calls</th><th>Probe</th><th>Calibration</th><th>Actions</th></tr></thead><tbody></tbody></table>
-<div style="margin-top:.5rem"><button id="save">Save settings</button> <span class="muted">Keys are written to ~/.pwr/keys.env (mode 600) and never shown again.</span></div>
+<div class="steps" id="steps"></div>
+<table id="arms"><thead><tr><th>Arm</th><th>Model</th><th>API key</th><th>Probe</th><th>Calibration</th><th>Do next</th>
+<th class="adv">Base URL</th><th class="adv">Conc.</th><th class="adv">Thinking</th><th class="adv">Max tokens</th><th class="adv">$/M in</th><th class="adv">$/M out</th><th class="adv">Calib. calls</th></tr></thead><tbody></tbody></table>
+<div class="small" style="margin-top:.4rem"><label><input type="checkbox" id="adv"> show advanced settings</label> · settings save as you change them · keys go to ~/.pwr/keys.env (mode 600) and are never shown again</div>
 <h2>Jobs</h2>
 <table id="jobs"><thead><tr><th>Job</th><th>Status</th><th>Started</th><th>Log</th></tr></thead><tbody></tbody></table>
 <pre id="log" style="display:none"></pre>
@@ -22,69 +24,81 @@ button:disabled{opacity:.4;cursor:default} pre{background:#0a0c0d;color:#ddd;pad
 <table id="runs"><thead><tr><th>Run</th><th>Arm / model</th><th>Status</th><th>Wall s</th><th>Prompt tok</th><th>Completion tok</th><th>Cost</th><th>Passed first try</th><th>Retries</th><th>Reviewer corrections</th><th>Final tests</th><th>Outcomes</th><th>Queue</th><th></th></tr></thead><tbody></tbody></table>
 <script>
 const $ = (s) => document.querySelector(s);
-let S = null;
+let S = null, armsBuilt = false;
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const num = (v, d = 0) => (v == null || Number.isNaN(v) ? "" : Number(v).toFixed(d));
 async function load() { S = await (await fetch("/api/state")).json(); render(); }
-function render() {
-  $("#brief").textContent = S.brief.ok ? `BRIEF.md frozen, sha256 ${S.brief.hash.slice(0, 16)}…  ·  ${S.tickets.length} tickets` : `BRIEF: ${S.brief.error}`;
-  $("#keys").textContent = `keys file ${S.keys.path} mode ${S.keys.mode || "(none)"}; saved for: ${Object.entries(S.keys.has).filter(([, v]) => v).map(([k]) => k).join(", ") || "none"}`;
+const api = (arm) => S.arms[arm].mode !== "claude";
+function nextFor(arm) {
+  const a = S.arms[arm];
+  if (!api(arm)) return { act: "run", label: "Run (queues for Claude)" };
+  if (!S.keys.has[arm]) return { act: null, label: "paste key, press Save" };
+  if (!a.model) return { act: "probe", label: "Probe (finds model id)" };
+  if (!a.probe?.context_window) return { act: "probe", label: "Probe" };
+  if (!a.calibration || a.calibration.model !== a.model) return { act: "calibrate", label: `Calibrate (~${a.calibrationCalls} calls)` };
+  return { act: "run", label: "Run" };
+}
+function buildArms() {
   const tb = $("#arms tbody"); tb.innerHTML = "";
   for (const arm of ["A", "B", "C"]) {
-    const a = S.arms[arm]; const api = a.mode !== "claude";
-    const probe = a.probe ? `window ${a.probe.context_window ?? "?"}<br><span class="muted">${(a.probe.at || "").slice(0, 16)}; thinking off ${a.probe.thinking_off_works}; schema ${a.probe.steps?.find((s) => s.step === "one_call")?.schema_honoured}</span>` : "";
-    const cal = a.calibration ? `n=${a.calibration.n_ok}/${a.calibration.n}, ${num(a.calibration.speed_tps_p10, 1)} tps p10, ${num(a.calibration.chars_per_token_p10, 2)} c/t, ttft p95 ${num(a.calibration.ttft_p95, 1)}s, ans p95 ${a.calibration.answer_tokens_p95}<br><span class="muted">${a.calibration.model === a.model ? "" : "STALE MODEL: "}${(a.calibration.at || "").slice(0, 16)}</span>` : "";
+    const a = S.arms[arm], on = api(arm);
     tb.insertAdjacentHTML("beforeend", `<tr data-arm="${arm}">
-      <td><b>${esc(a.label)}</b><br><span class="pill">${a.mode}</span></td>
-      <td><input type="text" name="baseUrl" value="${esc(a.baseUrl)}" ${api ? "" : "disabled"}></td>
-      <td><input type="text" name="model" value="${esc(a.model)}" placeholder="${esc(a.modelHint || "")}" ${api ? "" : "disabled"}></td>
-      <td><input type="password" name="apiKey" placeholder="${S.keys.has[arm] ? "saved" : "paste key"}" autocomplete="off" ${api ? "" : "disabled"}></td>
-      <td><input type="number" name="concurrency" min="1" value="${esc(a.concurrency)}" ${api ? "" : "disabled"}></td>
-      <td><input type="checkbox" name="thinking" ${a.thinking ? "checked" : ""} ${api ? "" : "disabled"}></td>
-      <td><input type="number" name="maxTokens" value="${esc(a.maxTokens ?? "")}" placeholder="from calibration" ${api ? "" : "disabled"}></td>
-      <td><input type="number" name="priceInPerM" step="any" value="${esc(a.priceInPerM ?? "")}"></td>
-      <td><input type="number" name="priceOutPerM" step="any" value="${esc(a.priceOutPerM ?? "")}"></td>
-      <td><input type="number" name="calibrationCalls" value="${esc(a.calibrationCalls ?? "")}" ${api ? "" : "disabled"}></td>
-      <td>${probe}</td><td>${cal}</td>
-      <td><button data-act="probe" ${api ? "" : "disabled"}>Probe</button><button data-act="calibrate" ${api ? "" : "disabled"}>Calibrate</button><button data-act="run">Run</button></td></tr>`);
+      <td><b>${esc(a.label)}</b></td>
+      <td><input type="text" name="model" style="width:11rem" value="${esc(a.model)}" placeholder="${esc(a.modelHint || "")}" ${on ? "" : "disabled"}></td>
+      <td>${on ? `<span class="key-cell"><input type="password" name="apiKey" style="width:10rem" placeholder="paste key" autocomplete="off"> <button class="secondary" data-savekey="${arm}">Save</button> <span class="key-status"></span></span>` : '<span class="small">not needed</span>'}</td>
+      <td class="probe-cell small"></td><td class="cal-cell small"></td>
+      <td class="next-cell"></td>
+      <td class="adv"><input type="text" name="baseUrl" style="width:14rem" value="${esc(a.baseUrl)}" ${on ? "" : "disabled"}></td>
+      <td class="adv"><input type="number" name="concurrency" style="width:3.5rem" min="1" value="${esc(a.concurrency)}" ${on ? "" : "disabled"}></td>
+      <td class="adv"><input type="checkbox" name="thinking" ${a.thinking ? "checked" : ""} ${on ? "" : "disabled"}></td>
+      <td class="adv"><input type="number" name="maxTokens" style="width:5rem" value="${esc(a.maxTokens ?? "")}" placeholder="auto" ${on ? "" : "disabled"}></td>
+      <td class="adv"><input type="number" name="priceInPerM" style="width:5rem" step="any" value="${esc(a.priceInPerM ?? "")}"></td>
+      <td class="adv"><input type="number" name="priceOutPerM" style="width:5rem" step="any" value="${esc(a.priceOutPerM ?? "")}"></td>
+      <td class="adv"><input type="number" name="calibrationCalls" style="width:4rem" value="${esc(a.calibrationCalls ?? "")}" ${on ? "" : "disabled"}></td></tr>`);
   }
+  armsBuilt = true;
+}
+function render() {
+  $("#brief").textContent = S.brief.ok ? `BRIEF.md frozen (sha256 ${S.brief.hash.slice(0, 12)}…) · ${S.tickets.length} tickets` : `BRIEF: ${S.brief.error}`;
+  if (!armsBuilt) buildArms();
+  const todo = [];
+  for (const arm of ["A", "B", "C"]) {
+    const tr = document.querySelector(`#arms tr[data-arm="${arm}"]`), a = S.arms[arm], n = nextFor(arm);
+    const ks = tr.querySelector(".key-status"); if (ks) ks.innerHTML = S.keys.has[arm] ? '<span class="ok">saved ✓</span>' : '<span class="bad">missing</span>';
+    tr.querySelector(".probe-cell").innerHTML = a.probe ? `window <b>${a.probe.context_window ?? "?"}</b><br>${(a.probe.at || "").slice(0, 16)}` : (api(arm) ? "not yet" : "");
+    tr.querySelector(".cal-cell").innerHTML = a.calibration ? `${a.calibration.n_ok}/${a.calibration.n} ok · ${num(a.calibration.speed_tps_p10, 1)} tok/s · answer p95 ${a.calibration.answer_tokens_p95}${a.calibration.model === a.model ? "" : '<br><span class="bad">stale model</span>'}` : (api(arm) ? "not yet" : "");
+    const running = S.jobs.find((j) => j.arm === arm && j.status === "running");
+    tr.querySelector(".next-cell").innerHTML = running ? `<span class="pill">${esc(running.kind)} running…</span>` : n.act ? `<button data-act="${n.act}">${esc(n.label)}</button>` : `<span class="small">${esc(n.label)}</span>`;
+    if (api(arm) && !S.keys.has[arm]) todo.push(`arm ${arm}: paste key and press Save`);
+  }
+  $("#steps").innerHTML = todo.length ? `<b>Next:</b> ${todo.join("; ")}.` : `<b>Keys saved.</b> Each arm's "Do next" button is the only one to press; order is Probe → Calibrate → Run. Ask Claude before pressing, since Probe/Calibrate/Run cost real calls.`;
   const jb = $("#jobs tbody"); jb.innerHTML = "";
   for (const j of S.jobs) jb.insertAdjacentHTML("beforeend", `<tr><td>${esc(j.id)}</td><td class="${j.status === "done" ? "ok" : j.status === "running" ? "" : "bad"}">${esc(j.status)}</td><td>${esc(j.started.slice(11, 19))}</td><td><button class="secondary" data-log="${esc(j.id)}">view</button></td></tr>`);
   const rb = $("#runs tbody"); rb.innerHTML = "";
   for (const r of S.runs) rb.insertAdjacentHTML("beforeend", `<tr><td>${esc(r.id)}<br><span class="pill">${esc(r.kind)}</span></td><td>${esc(r.arm)} ${esc(r.model)}</td><td>${esc(r.status)}</td><td>${num(r.wall_s)}</td><td>${r.prompt_tokens}</td><td>${r.completion_tokens}${r.reasoning_tokens ? ` <span class="muted">(+${r.reasoning_tokens} reasoning)</span>` : ""}</td><td>${r.cost == null ? '<span class="muted">set $/M</span>' : num(r.cost, 4)}</td><td>${r.tickets_passed_first_try}/${r.tickets_total ?? "?"}</td><td>${r.retries}</td><td><input type="number" style="width:4rem" value="${esc(r.reviewer_corrections ?? "")}" data-corr="${esc(r.id)}"></td><td>${r.tests_final ? `${r.tests_final.pass} pass / ${r.tests_final.fail} fail` : ""}</td><td class="muted">${esc(Object.entries(r.outcomes).map(([k, v]) => `${k}:${v}`).join(" "))}</td><td>${r.queue ? `<span class="bad">${r.queue} for Claude</span>` : ""}</td><td>${r.kind === "run" ? `<a href="/play/${encodeURIComponent(r.id)}/index.html" target="_blank">play</a>` : ""}</td></tr>`);
 }
-$("#save").onclick = async () => {
-  const patch = {};
-  for (const tr of document.querySelectorAll("#arms tbody tr")) {
-    const arm = tr.dataset.arm; const o = {};
-    for (const inp of tr.querySelectorAll("input")) {
-      if (inp.disabled) continue;
-      if (inp.type === "checkbox") o[inp.name] = inp.checked;
-      else if (inp.type === "number") o[inp.name] = inp.value === "" ? null : Number(inp.value);
-      else if (inp.name === "apiKey") { if (inp.value) o.apiKey = inp.value; }
-      else o[inp.name] = inp.value.trim();
-    }
-    patch[arm] = o;
-  }
-  const r = await (await fetch("/api/settings", { method: "POST", body: JSON.stringify(patch) })).json();
-  if (r.error) alert(r.error); await load();
-};
+async function post(url, obj) { const r = await (await fetch(url, { method: "POST", body: JSON.stringify(obj) })).json(); if (r.error) alert(r.error); return r; }
+$("#adv").onchange = (e) => document.body.classList.toggle("show-adv", e.target.checked);
+document.addEventListener("change", async (e) => {
+  const inp = e.target;
+  if (inp.dataset.corr) return post(`/api/runs/${encodeURIComponent(inp.dataset.corr)}/corrections`, { corrections: inp.value });
+  const tr = inp.closest("#arms tr"); if (!tr || !inp.name || inp.name === "apiKey") return;
+  const v = inp.type === "checkbox" ? inp.checked : inp.type === "number" ? (inp.value === "" ? null : Number(inp.value)) : inp.value.trim();
+  await post("/api/settings", { [tr.dataset.arm]: { [inp.name]: v } }); await load();
+});
 document.addEventListener("click", async (e) => {
+  const sk = e.target.closest("button[data-savekey]");
+  if (sk) { const tr = sk.closest("tr"), inp = tr.querySelector('input[name="apiKey"]'); if (!inp.value) return alert("paste the key first"); await post("/api/settings", { [sk.dataset.savekey]: { apiKey: inp.value } }); inp.value = ""; await load(); return; }
   const b = e.target.closest("button[data-act]");
   if (b) {
-    const arm = b.closest("tr").dataset.arm, act = b.dataset.act; const bodyObj = {};
-    if (act === "probe" && !S.arms[arm].model) bodyObj.findModel = S.arms[arm].modelHint || "";
-    if (act === "calibrate" && !confirm(`Calibrate arm ${arm}: about ${S.arms[arm].calibrationCalls} real calls. Continue?`)) return;
-    if (act === "run" && !confirm(`Run all ${S.tickets.length} tickets for arm ${arm}${S.arms[arm].mode === "claude" ? " (no API calls; queues for the Claude session)" : " (real calls)"}. Continue?`)) return;
-    if (act === "probe" && !confirm(`Probe arm ${arm}: one real call plus a max_tokens ladder. Continue?`)) return;
-    const r = await (await fetch(`/api/${act}/${arm}`, { method: "POST", body: JSON.stringify(bodyObj) })).json();
-    if (r.error) alert(r.error); await load(); return;
+    const arm = b.closest("tr").dataset.arm, act = b.dataset.act, a = S.arms[arm], bodyObj = {};
+    if (act === "probe" && !a.model) bodyObj.findModel = a.modelHint || "";
+    const msg = { probe: `Probe arm ${arm}: one real call plus a max_tokens ladder.`, calibrate: `Calibrate arm ${arm}: about ${a.calibrationCalls} real calls.`, run: `Run all ${S.tickets.length} tickets for arm ${arm}${api(arm) ? " (real calls)" : " (no API calls; queues for the Claude session)"}.` }[act];
+    if (!confirm(msg + " Continue?")) return;
+    await post(`/api/${act}/${arm}`, bodyObj); await load(); return;
   }
   const l = e.target.closest("button[data-log]");
   if (l) { const t = await (await fetch(`/api/jobs/${encodeURIComponent(l.dataset.log)}/log`)).text(); $("#log").style.display = "block"; $("#log").textContent = t; $("#log").scrollTop = 1e9; }
 });
-document.addEventListener("change", async (e) => {
-  if (e.target.dataset.corr) { await fetch(`/api/runs/${encodeURIComponent(e.target.dataset.corr)}/corrections`, { method: "POST", body: JSON.stringify({ corrections: e.target.value }) }); }
-});
-load(); setInterval(() => { if (!document.activeElement || document.activeElement.tagName !== "INPUT") load(); }, 4000);
+load(); setInterval(load, 4000);
 </script></body></html>
