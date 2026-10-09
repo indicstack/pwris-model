@@ -101,8 +101,20 @@ async function table() {
   const mmss = (sec) => `${Math.floor(sec / 60)} min ${Math.round(sec % 60)} s`;
   const row = `| ${m.id} (IndicStack ${m.model}) | ${fmt(s.prompt_tokens)} | ${fmt(s.completion_tokens)} | ₹${workerInr.toFixed(2)} | ${fmt((ru.input || 0) + (ru.cache_write || 0) + (ru.cache_read || 0))} | ${fmt(ru.output || 0)} | ₹${reviewInr.toFixed(2)} | ${s.tickets_passed_first_try}/${s.tickets_total} | ${s.tests_final ? `${s.tests_final.pass}/${s.tests_final.pass + s.tests_final.fail}` : "?"} | ${m.reviewerCorrections ?? "?"} | **₹${(workerInr + reviewInr).toFixed(2)}** | ${mmss(wall + rs)} |`;
   const header = `| Run | Worker tokens in | Worker tokens out | Worker cost | Opus review tokens in | Opus review tokens out | Opus review cost | First try | Final tests | Findings | Total cost | Total time |\n|---|---|---|---|---|---|---|---|---|---|---|---|`;
-  say(header + "\n" + row);
-  writeFileSync(resolve(run, "TABLE.md"), header + "\n" + row + "\n");
+  let note = "";
+  try {
+    const j = await (await fetch("https://openrouter.ai/api/v1/models")).json();
+    const id = String(args["opus-id"] || "anthropic/claude-opus-5.5");
+    const o = j.data.find((x) => x.id === id);
+    if (o) {
+      const pm = (v) => Number(v) * 1e6;
+      const px = { in: pm(o.pricing.prompt), out: pm(o.pricing.completion), cr: pm(o.pricing.input_cache_read ?? 0), cw: pm(o.pricing.input_cache_write ?? 0) };
+      const usd = ((ru.input || 0) * px.in + (ru.cache_read || 0) * px.cr + (ru.cache_write || 0) * px.cw + (ru.output || 0) * px.out) / 1e6;
+      note = `Opus list price (${id}, OpenRouter, ${new Date().toISOString().slice(0, 10)}): $${px.in}/M in, $${px.out}/M out, $${px.cr}/M cache read, $${px.cw}/M cache write. Review at these prices: ₹${(usd * rate).toFixed(2)}; Claude reported ₹${reviewInr.toFixed(2)}.`;
+    }
+  } catch { note = "(Opus list price lookup failed; review cost is Claude's reported figure)"; }
+  say(header + "\n" + row + (note ? "\n\n" + note : ""));
+  writeFileSync(resolve(run, "TABLE.md"), header + "\n" + row + "\n" + (note ? "\n" + note + "\n" : ""));
 }
 
 const cmds = { status, preflight, run, review, table };
