@@ -42,7 +42,7 @@ for (const t of tickets.filter((t) => true).sort((a, b) => a.id - b.id)) {
     appendJsonl(p.calls, row);
     say(`t${t.id} attempt ${attempt} -> ${row.kind} (${row.seconds}s, in ${inTok}, out ${row.completion_tokens}, $${row.cost})`);
     if (!parsed.ok) { if (attempt === 1) { fixes.push({ name: "bad_json_notice", text: `The previous answer was not valid JSON for the schema (${parsed.error}). Return exactly one JSON object {"files":[{"path","content"}]} and nothing else.` }); continue; } enqueueForClaude(run.dir, t, parsed.error); recordTicket(run.dir, { ticket: t.id, status: "queued", attempts: attempt, error: "bad_json" }); status.set(t.id, "queued"); break; }
-    const c = applyAndCheck({ runDir: run.dir, ticket: t, files: parsed.files, attempt });
+    const c = applyAndCheck({ runDir: run.dir, ticket: t, files: parsed.files, attempt, alsoTests: tickets.filter((x) => status.get(x.id) === "ok").map((x) => x.test) });
     if (c.ok) { recordTicket(run.dir, { ticket: t.id, status: "ok", attempts: attempt, tests_pass: c.test.pass, tests_fail: 0 }); status.set(t.id, "ok"); say(`t${t.id} OK (${c.test.pass} tests)`); done = true; }
     else if (attempt === 1) { say(`t${t.id} check failed: ${c.error.split("\n")[0]}`); fixes.push({ name: "check_failure", text: `Your previous files failed the check. Fix them. Error:\n${c.error.slice(0, 3000)}` }); }
     else { enqueueForClaude(run.dir, t, c.error); recordTicket(run.dir, { ticket: t.id, status: "queued", attempts: attempt, error: "check_failed" }); status.set(t.id, "queued"); }

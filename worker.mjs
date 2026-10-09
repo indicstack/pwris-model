@@ -109,7 +109,7 @@ async function runTicket({ ticket, arm, cfg, cal, probe, p, apiKey, limiter, sta
       if (addFix("bad_json_notice", `The previous answer was not valid JSON for the schema (${parsed.error}). Return exactly one JSON object {"files":[{"path","content"}]} and nothing else.`)) continue;
       enqueueForClaude(p.dir, ticket, `bad_json twice: ${parsed.error}`); recordTicket(p.dir, { ticket: ticket.id, status: "queued", attempts: attempt, error: "bad_json" }); return { status: "queued" };
     }
-    const c = applyAndCheck({ runDir: p.dir, ticket, files: parsed.files, attempt });
+    const c = applyAndCheck({ runDir: p.dir, ticket, files: parsed.files, attempt, alsoTests: state.doneTests() });
     if (c.ok) { recordTicket(p.dir, { ticket: ticket.id, status: "ok", attempts: attempt, tests_pass: c.test.pass, tests_fail: 0 }); log(p, `t${ticket.id} OK (${c.test.pass} tests)`); return { status: "ok" }; }
     log(p, `t${ticket.id} check failed: ${c.error.split("\n")[0]}`);
     if (checkRetries++ < 1 && addFix("check_failure", `Your previous files failed the check. Fix them. Error:\n${c.error.slice(0, 3000)}`)) continue;
@@ -146,7 +146,7 @@ async function main() {
   if (cal) updateMeta(run.dir, { calibration: { at: cal.at, n: cal.n, speed_tps_p10: cal.speed_tps_p10, answer_tokens_p95: cal.answer_tokens_p95 } });
   if (probe) updateMeta(run.dir, { probe: { at: probe.at, context_window: probe.context_window } });
   const limiter = createLimiter({ start: cfg.concurrency || 1, max: cfg.concurrency || 1, cleanMultiplier: DEFAULTS.aimd_clean_multiplier });
-  const state = { consecutive429: 0, runId: run.id };
+  const state = { consecutive429: 0, runId: run.id, doneTests: () => tickets.filter((t) => status.get(t.id) === "ok").map((t) => t.test) };
   const status = new Map([...latestByKey(p.tickets, (r) => r.ticket)].map(([k, v]) => [k, v.status]));
   let breaker = false;
   const running = new Map();

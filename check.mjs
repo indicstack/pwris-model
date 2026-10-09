@@ -5,6 +5,7 @@ import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from
 import { resolve, dirname, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import { ROOT, loadBrief } from "./lib/brief.mjs";
+import { TESTS_BASE, WORK_ROOT } from "./lib/paths.mjs";
 import { loadTickets } from "./lib/prompt.mjs";
 import { DEFAULTS } from "./lib/settings.mjs";
 import { runPaths, updateMeta, readMeta } from "./lib/runs.mjs";
@@ -24,8 +25,8 @@ export function syntaxCheck(absPath) {
 }
 
 export function runTest(testRel, workDir, timeoutS = DEFAULTS.test_timeout_s) {
-  const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", resolve(ROOT, testRel)], {
-    cwd: ROOT, encoding: "utf8", timeout: timeoutS * 1000,
+  const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", resolve(TESTS_BASE, testRel)], {
+    cwd: WORK_ROOT || ROOT, encoding: "utf8", timeout: timeoutS * 1000,
     env: { ...process.env, PWR_WORK: workDir, NODE_TEST_CONTEXT: undefined, NODE_OPTIONS: undefined, FORCE_COLOR: undefined, NO_COLOR: "1" },
   });
   const out = ((r.stdout || "") + (r.stderr || "")).replace(/\x1b\[[0-9;]*m/g, "");
@@ -36,7 +37,7 @@ export function runTest(testRel, workDir, timeoutS = DEFAULTS.test_timeout_s) {
 }
 
 // files: [{path, content}] from the worker. Returns { ok, error, test }.
-export function applyAndCheck({ runDir, ticket, files, attempt }) {
+export function applyAndCheck({ runDir, ticket, files, attempt, alsoTests = [] }) {
   const p = runPaths(runDir);
   const outDir = resolve(p.outputs, `t${ticket.id}-attempt${attempt}`);
   mkdirSync(outDir, { recursive: true });
@@ -53,8 +54,7 @@ export function applyAndCheck({ runDir, ticket, files, attempt }) {
   const written = new Set(files.map((f) => f.path.replace(/^\.\//, "")));
   for (const w of ticket.writes) if (!written.has(w)) return { ok: false, error: `ticket requires file ${w} but the answer did not include it` };
   // harness-owned constants are always present in the work dir
-  const constSrc = resolve(ROOT, "game/constants.mjs"), constDst = resolve(p.work, "game/constants.mjs");
-  if (!existsSync(constDst)) copyFileSync(constSrc, constDst);
+  if (!WORK_ROOT) { const constSrc = resolve(ROOT, "game/constants.mjs"), constDst = resolve(p.work, "game/constants.mjs"); if (existsSync(constSrc) && !existsSync(constDst)) copyFileSync(constSrc, constDst); }
   for (const w of ticket.writes) {
     const err = syntaxCheck(resolve(p.work, w));
     if (err) return { ok: false, error: `syntax check failed for ${w}:\n${err}` };
@@ -62,6 +62,11 @@ export function applyAndCheck({ runDir, ticket, files, attempt }) {
   const test = runTest(ticket.test, p.work);
   writeFileSync(resolve(outDir, "test.txt"), test.output);
   if (!test.ok) return { ok: false, error: `tests: ${test.pass} passed, ${test.fail} failed${test.timedOut ? " (timed out)" : ""}\n${test.output}`, test };
+  // regression check (round 2): every earlier passed ticket's tests must still pass
+  for (const other of alsoTests) {
+    const r = runTest(other, p.work);
+    if (!r.ok) return { ok: false, error: `regression: ${other} now fails after this ticket (${r.pass} passed, ${r.fail} failed)\n${r.output}`, test: r };
+  }
   return { ok: true, test };
 }
 
