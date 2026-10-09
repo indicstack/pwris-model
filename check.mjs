@@ -18,6 +18,8 @@ export function syntaxCheck(absPath) {
   }
   if (absPath.endsWith(".html")) {
     const html = readFileSync(absPath, "utf8");
+    // The <canvas> requirement is the Flappy bench's; project mode only needs a parseable-looking page.
+    if (process.env.PWR_PROJECT) return /<html\b|<!doctype html>/i.test(html) ? null : "html file has no <html> or <!doctype html>";
     if (!/<canvas\b/.test(html)) return "index.html has no <canvas>";
     return null;
   }

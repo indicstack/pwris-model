@@ -1,4 +1,4 @@
-# pwris — planner-worker-reviewer on IndicStack
+# pwris-model — planner-worker-reviewer on IndicStack
 
 Claude plans and reviews. IndicStack's Qwen model writes every ticket. Plain Node scripts check every answer. Pattern: `explainer.html` (Prasanth Ghanta, Oct 2026).
 
@@ -8,7 +8,7 @@ Needs Node 18+ and Claude Code 2.1.289+.
 
 Inside Claude Code:
 ```
-/plugin marketplace add IndicStack/pwr-bench
+/plugin marketplace add IndicStack/pwris-model
 /plugin install pwris@indicstack
 ```
 Then, once, in your own terminal (hidden prompt; never paste the key into chat):
