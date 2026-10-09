@@ -34,7 +34,7 @@ const rows = [];
 let consecutive429 = 0;
 async function one(i) {
   const ticket = tickets[i % tickets.length];
-  const messages = buildMessages(ticket, resolve(run.dir, "work"), [], run.id);
+  const messages = buildMessages(ticket, resolve(run.dir, "work"), [], `${run.id}/call${i}`);
   const chars = promptChars(messages);
   const est = tokensEstimate(chars, DEFAULTS.chars_per_token);
   const maxTokens = Math.max(256, probe.context_window - est - DEFAULTS.spare_tokens);
