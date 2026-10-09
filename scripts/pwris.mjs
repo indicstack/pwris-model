@@ -107,7 +107,7 @@ async function table() {
     const id = String(args["opus-id"] || "anthropic/claude-opus-5.5");
     const o = j.data.find((x) => x.id === id);
     if (o) {
-      const pm = (v) => Number(v) * 1e6;
+      const pm = (v) => Math.round(Number(v) * 1e8) / 100;
       const px = { in: pm(o.pricing.prompt), out: pm(o.pricing.completion), cr: pm(o.pricing.input_cache_read ?? 0), cw: pm(o.pricing.input_cache_write ?? 0) };
       const usd = ((ru.input || 0) * px.in + (ru.cache_read || 0) * px.cr + (ru.cache_write || 0) * px.cw + (ru.output || 0) * px.out) / 1e6;
       note = `Opus list price (${id}, OpenRouter, ${new Date().toISOString().slice(0, 10)}): $${px.in}/M in, $${px.out}/M out, $${px.cr}/M cache read, $${px.cw}/M cache write. Review at these prices: ₹${(usd * rate).toFixed(2)}; Claude reported ₹${reviewInr.toFixed(2)}.`;
