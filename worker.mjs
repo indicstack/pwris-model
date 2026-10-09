@@ -70,7 +70,7 @@ async function runTicket({ ticket, arm, cfg, cal, probe, p, apiKey, limiter, sta
     const u = r.usage || {};
     const row = { ts: new Date().toISOString(), stage: "worker", arm, ticket: ticket.id, attempt, kind: r.kind, http_status: r.status, seconds: +r.seconds.toFixed(3), ttft: r.ttft, max_gap: +r.maxGap.toFixed(3),
       prompt_tokens: u.prompt_tokens ?? null, completion_tokens: u.completion_tokens ?? null, reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? (r.reasoningChars ? Math.round(r.reasoningChars / charsPerToken) : 0),
-      max_tokens: maxTokens, finish_reason: r.finishReason, fixes: fixes.map((f) => f.name), error: r.error ? r.error.slice(0, 500) : null, limit: limiter.limit };
+      max_tokens: maxTokens, cost: Number.isFinite(u.cost) ? u.cost : null, finish_reason: r.finishReason, fixes: fixes.map((f) => f.name), error: r.error ? r.error.slice(0, 500) : null, limit: limiter.limit };
     appendJsonl(p.calls, row);
     lastKind = r.kind;
     if (r.text) writeFileSync(resolve(p.outputs, `t${ticket.id}-attempt${attempt}.raw.txt`), r.text);

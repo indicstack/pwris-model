@@ -43,7 +43,7 @@ async function one(i) {
   limiter.release(r.kind === "429" || r.status === 503 ? "overload" : r.kind === "ok" ? "clean" : "other");
   const u = r.usage || {};
   const writeS = r.ttft != null ? r.seconds - r.ttft : null;
-  const row = { ts: new Date().toISOString(), stage: "calibrate", arm, i, ticket: ticket.id, kind: r.kind, http_status: r.status, seconds: +r.seconds.toFixed(3), ttft: r.ttft, max_gap: +r.maxGap.toFixed(3), prompt_chars: chars, prompt_tokens: u.prompt_tokens ?? null, completion_tokens: u.completion_tokens ?? null, reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? 0, answer_chars: r.text.length, max_tokens: maxTokens, schema_ok: r.kind === "ok" ? parseFiles(r.text).ok : null, write_s: writeS, error: r.error?.slice(0, 300) || null, limit: limiter.limit };
+  const row = { ts: new Date().toISOString(), stage: "calibrate", arm, i, ticket: ticket.id, kind: r.kind, http_status: r.status, seconds: +r.seconds.toFixed(3), ttft: r.ttft, max_gap: +r.maxGap.toFixed(3), prompt_chars: chars, prompt_tokens: u.prompt_tokens ?? null, completion_tokens: u.completion_tokens ?? null, reasoning_tokens: u.completion_tokens_details?.reasoning_tokens ?? 0, cost: Number.isFinite(u.cost) ? u.cost : null, answer_chars: r.text.length, max_tokens: maxTokens, schema_ok: r.kind === "ok" ? parseFiles(r.text).ok : null, write_s: writeS, error: r.error?.slice(0, 300) || null, limit: limiter.limit };
   appendJsonl(p.calls, row);
   rows.push(row);
   if (r.text) writeFileSync(resolve(p.outputs, `call${i}-t${ticket.id}.raw.txt`), r.text);
