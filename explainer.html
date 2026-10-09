@@ -1,0 +1,703 @@
+<DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planner, Worker, Reviewer — How the Plumbing Works</title>
+<style>
+  :root {
+    --ink: #0b0c0e; --body: #2b2e33; --muted: #6b7076; --hairline: #e6e6e3;
+    --night: #0a0c0d; --accent: #ff6602; --accent-ink: #b84500; --tint: #fff1e6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: var(--body); background: #f5f5f2; line-height: 1.6; font-size: 15px; }
+  .mono { font-family: "JetBrains Mono", "Fira Code", monospace; letter-spacing: 0.06em; text-transform: uppercase; }
+  header { background: var(--night); color: #fff; padding: 2rem 2rem 1.5rem; border-bottom: 3px solid var(--accent); }
+  header .meta { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 0.5rem; }
+  header .meta .tag { font-size: 0.7rem; color: var(--muted); }
+  header .meta .brand { font-size: 0.85rem; font-weight: 600; }
+  header .meta .brand span { color: var(--accent); }
+  header h1 { font-size: 1.7rem; font-weight: 700; color: #fff; letter-spacing: -0.02em; margin-bottom: 0.4rem; }
+  header p { color: #b0b4ba; font-size: 0.95rem; max-width: 700px; }
+  header code { font-family: "JetBrains Mono", monospace; font-size: 0.85rem; background: rgba(255,255,255,0.1); padding: 1px 5px; border-radius: 3px; }
+  nav { position: sticky; top: 0; z-index: 100; background: #fff; border-bottom: 1px solid var(--hairline); display: flex; overflow-x: auto; }
+  nav button { background: none; border: none; padding: 0.85rem 1.2rem; font-size: 0.82rem; font-weight: 600; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: color 0.15s, border-color 0.15s; }
+  nav button.active { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  nav button:hover { color: var(--accent-ink); }
+  .section { display: none; padding: 2rem; max-width: 900px; margin: 0 auto; }
+  .section.active { display: block; }
+  h2 { font-size: 1.3rem; font-weight: 700; color: var(--ink); margin-bottom: 0.3rem; }
+  h2 .num { color: var(--accent); font-size: 0.8rem; margin-right: 0.4rem; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 6px; padding: 1.2rem 1.4rem; margin-bottom: 1rem; transition: box-shadow 0.15s; }
+  .card:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.07); }
+  .card h3 { font-size: 0.95rem; font-weight: 700; color: var(--ink); margin-bottom: 0.3rem; }
+  .card p { font-size: 0.88rem; color: var(--body); }
+  .card .detail { display: none; margin-top: 0.7rem; padding-top: 0.7rem; border-top: 1px solid var(--hairline); font-size: 0.85rem; color: var(--body); }
+  .card.open .detail { display: block; }
+  .card .toggle { font-size: 0.75rem; color: var(--accent-ink); cursor: pointer; font-weight: 600; margin-top: 0.4rem; user-select: none; }
+  .card .toggle:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; background: #fff; border: 1px solid var(--hairline); border-radius: 6px; overflow: hidden; margin-bottom: 1rem; }
+  th { background: var(--night); color: #fff; text-align: left; padding: 0.6rem 0.8rem; font-weight: 600; font-size: 0.78rem; }
+  td { padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--hairline); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--tint); }
+  .code-block { background: var(--night); color: #e0e0e0; font-family: "JetBrains Mono", monospace; font-size: 0.78rem; padding: 1rem 1.2rem; border-radius: 6px; overflow-x: auto; line-height: 1.7; margin-bottom: 1rem; }
+  .code-block .k { color: #7ecfff; }
+  .code-block .s { color: #a8e6a3; }
+  .code-block .c { color: #6b7076; }
+  .flow { display: flex; align-items: center; gap: 0; flex-wrap: wrap; margin: 1rem 0; }
+  .flow-box { padding: 0.5rem 0.8rem; border-radius: 4px; font-size: 0.78rem; font-weight: 600; white-space: nowrap; }
+  .flow-box.claude { background: var(--night); color: #fff; }
+  .flow-box.worker { background: var(--tint); color: var(--accent-ink); border: 1px solid var(--accent); }
+  .flow-box.script { background: #fff; color: var(--ink); border: 1px solid var(--ink); }
+  .flow-arrow { color: var(--muted); font-size: 1rem; padding: 0 0.3rem; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 640px) { .grid2 { grid-template-columns: 1fr; } }
+  .step-row { display: grid; grid-template-columns: 44px 1fr; gap: 0.8rem; align-items: start; margin-bottom: 0.8rem; }
+  .step-num { width: 32px; height: 32px; background: var(--night); color: var(--accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: 700; flex-shrink: 0; }
+  .step-body { padding-top: 0.2rem; }
+  .step-body h4 { font-size: 0.9rem; font-weight: 700; color: var(--ink); margin-bottom: 0.15rem; }
+  .step-body p { font-size: 0.83rem; color: var(--body); }
+  .badge { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 2px 7px; border-radius: 3px; margin-left: 0.4rem; vertical-align: middle; }
+  .badge.worker { background: var(--tint); color: var(--accent-ink); }
+  .badge.script { background: #e8e8e8; color: var(--ink); }
+  .badge.claude { background: var(--night); color: #fff; }
+  .check-item { display: flex; align-items: flex-start; gap: 0.6rem; padding: 0.7rem 0; border-bottom: 1px solid var(--hairline); }
+  .check-item:last-child { border-bottom: none; }
+  .check-icon { color: var(--accent); font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+  .check-content h4 { font-size: 0.87rem; font-weight: 700; color: var(--ink); }
+  .check-content p { font-size: 0.82rem; color: var(--body); margin-top: 2px; }
+  .footer { text-align: center; padding: 1.5rem; font-size: 0.75rem; color: var(--muted); border-top: 1px solid var(--hairline); margin-top: 2rem; }
+  .dark-strip { background: var(--night); color: #fff; border-radius: 6px; padding: 1rem 1.2rem; margin: 1rem 0; font-size: 0.85rem; }
+  .dark-strip code { font-family: "JetBrains Mono", monospace; color: var(--accent); font-size: 0.82rem; }
+</style>
+</head>
+<body>
+<header>
+  <div class="meta">
+    <span class="tag mono">Internal guide · IndicStack API · October 2026</span>
+    <span class="brand">Indic<span>Stack</span>.ai</span>
+  </div>
+  <h1>Planner, worker, reviewer: how the plumbing works</h1>
+  <p>A Claude session plans the work and reviews the result. An open model on the IndicStack API does the bulk reading. Plain scripts sit between every model step: they hold every fact and check every answer. Specs and settings are in the bundled <code>PLANNER-WORKER-REVIEWER.md</code>.</p>
+</header>
+<nav id="nav">
+  <button class="active" data-section="route">The Route</button>
+  <button data-section="roles">Who Does What</button>
+  <button data-section="call">One Worker Call</button>
+  <button data-section="settings">Request Settings</button>
+  <button data-section="checks">Script Checks</button>
+  <button data-section="review">Isolated Review</button>
+  <button data-section="evidence">Evidence</button>
+  <button data-section="setup">Setup</button>
+  <button data-section="ops">Platform Notes</button>
+</nav>
+<section id="route" class="section active">
+  <h2><span class="num mono">Figure 1</span> The Route</h2>
+  <p class="subtitle">Model and script alternate. The model never passes its own output straight to the next model step — a script sits between every pair. Errors the review keeps finding become new script checks, which feed back into the plan.</p>
+  <div style="overflow-x:auto; margin-bottom:1.5rem;">
+    <table>
+      <tr><th>Stage</th><th>Step</th><th>Who</th><th>What happens</th></tr>
+      <tr><td>1a</td><td>Queries</td><td><span class="badge worker">Worker</span></td><td>Drafts search queries from the brief. Every prompt quotes the brief rules word for word.</td></tr>
+      <tr><td>1b</td><td>Search &amp; cap</td><td><span class="badge script">Script</span></td><td>Runs queries, removes duplicates, applies the brief cap. Every ID comes from the source. Known facts go into the prompt as "harness facts".</td></tr>
+      <tr><td>2</td><td>Screen</td><td><span class="badge worker">Worker</span></td><td>One item per call. Answers: include, exclude, or <strong>uncertain</strong>. Uncertain goes on to full text. Without it, 13 known misses were exclusions over a fact the abstract didn't state.</td></tr>
+      <tr><td>3</td><td>Extract</td><td><span class="badge worker">Worker</span> <span class="badge script">Script</span></td><td>Extract in groups of 8. A cut-off group is halved. Every quote is checked word for word against the source, one retry, then dropped. Failures go to a Claude queue.</td></tr>
+      <tr><td>4</td><td>Normalise names</td><td><span class="badge worker">Worker</span> <span class="badge script">Script</span></td><td>Synonyms mapped to canonical names in batches. Script guards reject bad mappings. A failed batch <strong>stops the run</strong> instead of being skipped.</td></tr>
+      <tr><td>5</td><td>Score</td><td><span class="badge script">Script</span></td><td>The brief's rules, then the checks, then a deterministic ranking.</td></tr>
+      <tr><td>6</td><td>Draft answer</td><td><span class="badge worker">Worker</span> <span class="badge script">Script</span></td><td>Worker writes the final list and rationale from the script's ranking. Every departure is logged with its reason and record IDs.</td></tr>
+      <tr><td>7</td><td>Review &amp; grade</td><td><span class="badge claude">Claude</span></td><td>Fresh session in an isolated folder corrects judgement. A separate grader script re-checks IDs, quotes, and rules.</td></tr>
+    </table>
+  </div>
+  <div class="dark-strip">
+    <strong>Round 3 example:</strong> 1,302 IndicStack calls in 96 minutes. Extraction took 74–85% of wall time; screening 7–10%. That's where speed work belongs.
+  </div>
+</section>
+<section id="roles" class="section">
+  <h2><span class="num mono">01</span> Who Does What</h2>
+  <p class="subtitle">The open model reads, Claude judges, and scripts own the facts. In the Claude-only version of the example task, 74% of the cost was bulk reading by a Claude worker model. That is the part this pattern moves to IndicStack.</p>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Planner <span class="badge claude">Claude Code</span></h3>
+    <p>Writes the brief and the harness, reads calibration and results, turns repeated review findings into script checks, prepares the review folder.</p>
+    <p class="detail"><strong>Does not:</strong> bulk reading.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Scripts <span class="badge script">Node harness</span></h3>
+    <p>Search and fetch, caps, word-for-word quote checks, scoring rules, validation, every identifier, the call log.</p>
+    <p class="detail"><strong>Does not:</strong> judgement calls.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Worker <span class="badge worker">IndicStack model</span></h3>
+    <p>An open model (qwen38-27b in the example) with thinking off. Does search queries, screening, extraction, name normalising, and a draft of the final answer.</p>
+    <p class="detail"><strong>Does not:</strong> supply identifiers, or set the final order without the script's ranking.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Reviewer <span class="badge claude">Fresh Claude session</span></h3>
+    <p>A fresh Claude Code session in an isolated folder. Checks the workers' judgement on the outputs and corrects the final answer.</p>
+    <p class="detail"><strong>Does not:</strong> redo the work, or see project context.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Human <span class="badge" style="background:#e0f0e0;color:#2a6e2a">Task owner</span></h3>
+    <p>Rules the brief leaves open, the go-ahead for each run, final grading.</p>
+    <p class="detail">In the example, every judge so far has been a Claude model. A human grading is still pending.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="dark-strip">
+    <strong>The loop that makes it improve:</strong> When the reviewer catches the same kind of worker error twice, the planner writes a script check for it. In the example, the review replaced 6 of the top 10 in the first round and 1 on the 8 Oct output. The final list then matched the reviewer's corrected list.
+  </div>
+</section>
+<section id="call" class="section">
+  <h2><span class="num mono">Figure 2</span> One Worker Call, End to End</h2>
+  <p class="subtitle">Every outcome has exactly one next step. The server has 16 parallel slots shared by all users, with LiteLLM queuing overflow fairly. The example capped itself at 8 screening and 6 extraction calls.</p>
+
+  <div style="display:grid; grid-template-columns:auto auto auto auto; gap:0.5rem; align-items:start; margin-bottom:1.5rem; overflow-x:auto;">
+    <div class="card" style="margin:0;">
+      <h3 style="color:var(--accent-ink)">Prompt</h3>
+      <p>Shared text first, task line last. Strict JSON schema. Thinking off. The server's prefix cache reuses the processed source text across calls on the same item.</p>
+    </div>
+    <div class="card" style="margin:0;">
+      <h3>Limiter</h3>
+      <p>Waits for a free slot. One limit per stage. Screening starts at 6 (range 1–8), extraction at 4 (range 1–6).</p>
+    </div>
+    <div class="card" style="margin:0;">
+      <h3>Streaming client</h3>
+      <p>Three clocks: first token, stall, total. Stops runaway repeats (last 400 chars repeated 4× in a row).</p>
+    </div>
+    <div class="card" style="margin:0;">
+      <h3>Outcome</h3>
+      <p>One kind per call, logged as a JSONL line: stage, item ID, kind, seconds, time to first token, largest gap, prompt/completion/reasoning tokens.</p>
+    </div>
+  </div>
+
+  <h3 style="margin-bottom:0.8rem; font-size:0.95rem; color:var(--ink)">Outcome → Action</h3>
+  <div style="overflow-x:auto; margin-bottom:1rem;">
+    <table>
+      <tr><th>Outcome</th><th>Action</th></tr>
+      <tr><td><code>ok</code></td><td>On to the script checks.</td></tr>
+      <tr><td><code>length</code></td><td>Cut off at <code>max_tokens</code>. Split the group in half, then retry.</td></tr>
+      <tr><td><code>empty_content</code></td><td>Budget spent on hidden reasoning. Split or add a named fix, then retry.</td></tr>
+      <tr><td><code>bad_json</code></td><td>Never resend unchanged. Add a named fix, then retry.</td></tr>
+      <tr><td><code>runaway</code></td><td>Last 400 chars repeated 4×. Never resend unchanged. Add a named fix, then retry.</td></tr>
+      <tr><td><code>first_token_timeout</code></td><td>One retry after 30 s.</td></tr>
+      <tr><td><code>stall</code> / <code>total_timeout</code></td><td>One retry after 30 s.</td></tr>
+      <tr><td><code>502, 503, 504</code>, network drop</td><td>Try up to 3 times in all, waiting 2 s then 4 s. Nothing was produced, so a resend is safe.</td></tr>
+      <tr><td><code>429</code></td><td>Honour <code>Retry-After</code>, otherwise wait 15 s then 30 s.</td></tr>
+      <tr><td><strong>6 consecutive 429s</strong></td><td>Credit breaker: save state, exit with a distinct code, resume on the same command. Without it, a credit outage silently passes every remaining item.</td></tr>
+    </table>
+  </div>
+
+  <div class="dark-strip">
+    <strong>Adaptive concurrency (AIMD):</strong> After twice the current limit in clean calls, the limit goes up by 1. On a 503 or 429 it halves. Calls already in flight finish; new ones wait until the count is under the limit.
+  </div>
+
+  <div class="card">
+    <h3>Resume everywhere</h3>
+    <p>Each stage appends to a JSONL file; on restart the latest line per item wins, and only failed items are redone.</p>
+  </div>
+
+  <div class="card">
+    <h3>Prefix cache</h3>
+    <p>Calls on the same item share the system prompt and the source text; only the task line at the end changes. In the example, a paper's first read took 6.30 s to the first token (n=170) and a repeat 0.74 s (n=204). The trade-off: the source text is resent with every group call, so prompt tokens doubled (7.24M against 3.57M).</p>
+  </div>
+</section>
+<section id="settings" class="section">
+  <h2><span class="num mono">02</span> Request Settings</h2>
+  <p class="subtitle">Every call sends the same shape of request. The values below are the example's starting points. Re-measure them for your model and task with a calibration pilot, not from the model card.</p>
+
+  <div class="code-block">
+<span class="c">// Every worker call sends this shape</span>
+{
+  <span class="k">"model"</span>: <span class="s">"qwen38-27b"</span>,
+  <span class="k">"temperature"</span>: <span class="s">0</span>,
+  <span class="k">"max_tokens"</span>: <span class="s">400</span>,
+  <span class="k">"stream"</span>: <span class="s">true</span>,
+  <span class="k">"stream_options"</span>: { <span class="k">"include_usage"</span>: <span class="s">true</span> },
+  <span class="k">"chat_template_kwargs"</span>: { <span class="k">"enable_thinking"</span>: <span class="s">false</span> },
+  <span class="k">"response_format"</span>: { <span class="k">"type"</span>: <span class="s">"json_schema"</span>,
+    <span class="k">"json_schema"</span>: { <span class="k">"name"</span>: <span class="s">"out"</span>, <span class="k">"strict"</span>: <span class="s">true</span>, <span class="k">"schema"</span>: { } } },
+  <span class="k">"messages"</span>: [
+    { <span class="k">"role"</span>: <span class="s">"system"</span>, <span class="k">"content"</span>: <span class="s">"&lt;instructions shared by every call of this step&gt;"</span> },
+    { <span class="k">"role"</span>: <span class="s">"user"</span>, <span class="k">"content"</span>: <span class="s">"&lt;source text&gt;, then the task line last"</span> }
+  ]
+}
+  </div>
+
+  <div style="overflow-x:auto; margin-bottom:1rem;">
+    <table>
+      <tr><th>Field</th><th>Value</th><th>Why</th></tr>
+      <tr><td><code>chat_template_kwargs.enable_thinking</code></td><td><code>false</code></td><td>Thinking is <strong>on by default</strong> on this server. With it off, screening 53 items took 42 s; with it on, 744 s. With thinking on, 8 of 13 extraction calls ran out of tokens.</td></tr>
+      <tr><td><code>temperature</code></td><td><code>0</code></td><td>Reproducible decisions. An identical retry returns the same answer, so a failed call is changed (split, or given a named fix) before it is resent.</td></tr>
+      <tr><td><code>response_format</code></td><td><code>json_schema</code>, <code>strict: true</code></td><td>qwen honours it, so output parses without repair.</td></tr>
+      <tr><td><code>stream</code> + <code>include_usage</code></td><td><code>true</code></td><td>Lets the client tell a hung server from a stalled or merely slow reply, and gives token counts per call.</td></tr>
+      <tr><td>Message order</td><td>Shared text first, task line last</td><td>The server's prefix cache reuses the processed source text across calls on the same item.</td></tr>
+    </table>
+  </div>
+
+  <h3 style="margin-bottom:0.8rem; font-size:0.95rem; color:var(--ink)">Budgets &amp; Limits <span style="font-size:0.75rem;color:var(--muted)">(example values, qwen38-27b, 7 Oct 2026)</span></h3>
+  <div style="overflow-x:auto; margin-bottom:1rem;">
+    <table>
+      <tr><th>Setting</th><th>Value</th><th>How it was set</th></tr>
+      <tr><td>Context window used</td><td>65,536 (131,072 served)</td><td>Kept at the earlier run's value so rounds were comparable. The largest prompt was 32,331 tokens; a bigger window didn't fix anything, because failures came from writing time.</td></tr>
+      <tr><td>Answer budget, screening</td><td>400 tokens</td><td>Median answer 39 tokens; 200 was too tight.</td></tr>
+      <tr><td>Answer budget, item list</td><td>800 tokens</td><td>Pilot p95 was 273.</td></tr>
+      <tr><td>Extraction group</td><td>8 items, 3,400 tokens</td><td>One answer of 28 items needed 8,000 tokens (~8 min at ~16 tokens/s), and 4 studies were lost that way. Groups of 8: 14 of 14 finished, at most 2,213 tokens.</td></tr>
+      <tr><td>Writing speed for timeouts</td><td>12 tokens/s</td><td>Measured 23.5 with 2 calls in flight, then halved for full-run concurrency.</td></tr>
+      <tr><td>Total timeout</td><td>budget ÷ speed × 1.25 + first-token limit + 30 s</td><td>Scales with the answer. A flat 300 s cut off answers that legitimately needed 8 minutes.</td></tr>
+      <tr><td>First-token and stall limits</td><td>60 s each</td><td>Pilot p95 time to first token was 6.6 s; p99 gap between chunks 0.7 s.</td></tr>
+      <tr><td>Characters per token</td><td>3.45 (pilot p10) + 2,000 tokens spare</td><td>Checks that prompt plus answer fit the window before a call is sent.</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Calibration pilot</h3>
+    <p>Before each long run, send about 50–60 calls on the hardest items you have, using the real prompts. Record: writing speed (p10 and p50), characters per token, time to first token (p95), largest gap between chunks (p99), answer length per call type (p95).</p>
+    <p style="margin-top:0.5rem">Write the settings to a calibration file stamped with the model name, and make the harness refuse a file from a different model; speed differed about 3× between two qwen versions. The planner reviews the file before use, and records each adjustment and its reason.</p>
+  </div>
+</section>
+<section id="checks" class="section">
+  <h2><span class="num mono">03</span> Script Checks Between Worker and Reviewer</h2>
+  <p class="subtitle">Each check is deterministic code that never asks a model. Each was added after a run or a review exposed the error. Keep the worker's original output next to every correction, and count corrections in the run's metadata.</p>
+
+  <div class="card">
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Quote found word for word</h4>
+        <p>Catches: invented or altered evidence. <strong>Result:</strong> 0 quote failures in every run.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Quote names its subject</h4>
+        <p>Catches: a real quote that doesn't mention the item it supports. <strong>Result:</strong> fell from 26% of records to 2%.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Placeholder guard</h4>
+        <p>Catches: the model writing "null", "none" or "n/a" as a value, which other steps then reuse. <strong>Result:</strong> one "null" had spread to 48% of records and ranked #1, though it passed schema checks. None reached the output after the guard.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Variant numbers kept</h4>
+        <p>Catches: different items merged because only a number differs (p-tau181, p-tau217 → "p-tau"). <strong>Result:</strong> 25 such merges in one run, all real errors.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>A failed batch stops the run</h4>
+        <p>Catches: a skipped batch silently leaving data unprocessed. <strong>Result:</strong> one skipped batch had left 120 of 121 cohort names unmerged.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Claim shown by its quote</h4>
+        <p>Catches: a claimed rank or importance the quote doesn't show. <strong>Result:</strong> 262 claims downgraded; matched the reviewers on 27 of 29 records they judged.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>One source dominating</h4>
+        <p>Catches: one paper's 12 dataset labels counted as 12 independent cohorts. <strong>Result:</strong> flagged and counted once, as a stated lower bound.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Script ranking</h4>
+        <p>Catches: a model acting on an advisory flag in one run and ignoring it in the next. <strong>Result:</strong> the model now starts from the script's order, and every move it makes is logged.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Duplicate-name merge</h4>
+        <p>Catches: one item under two names. <strong>Result:</strong> 15 groups merged; deliberately excludes cases that look alike but differ.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Context documented</h4>
+        <p>Catches: missing or wrong context (here, the specimen — brain tissue counted as a fluid). <strong>Result:</strong> source sentence found for 760 of 827 records; exactly the 2 cases the reviewers found were flagged.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <h4>Independent grader</h4>
+        <p>Catches: wrong IDs, quotes not found, ranking-rule violations. <strong>Result:</strong> a separate script, not sharing the harness's code.</p>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="review" class="section">
+  <h2><span class="num mono">04</span> The Isolated Review</h2>
+  <p class="subtitle">The reviewer must judge the outputs, not the story around them, so it works with no project context. Each review in the example took 10–12 minutes with Opus 5.5.</p>
+
+  <div class="step-row">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h4>Make a folder outside every project</h4>
+      <p>e.g. <code>C:\Users\&lt;you&gt;\eval-isolated\review-&lt;date&gt;\</code>. Claude Code then loads no project CLAUDE.md, memory or history. Give it a neutral name, since the session sees its own path.</p>
+    </div>
+  </div>
+
+  <div class="step-row">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h4>Copy in the frozen brief and the run's outputs</h4>
+      <p>With model and harness names removed. Add the grader's report, relabelled the same way.</p>
+    </div>
+  </div>
+
+  <div class="step-row">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <h4>Leak scan</h4>
+      <p>Search the folder for model, vendor and project names before starting.</p>
+    </div>
+  </div>
+
+  <div class="step-row">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <h4>Write one PROMPT.md — keep it byte-identical across reviews</h4>
+      <p>So rounds can be compared. In the example it said:</p>
+    </div>
+  </div>
+
+  <div style="margin-left:2.5rem; margin-bottom:1rem;">
+    <div class="card">
+      <p style="margin-bottom:0.4rem">▸ You are the lead reviewer: check the workers' judgement, don't redo their work.</p>
+      <p style="margin-bottom:0.4rem">▸ Work only with the files in this folder, and fetch a source only when a check can't be settled from the records.</p>
+      <p style="margin-bottom:0.4rem">▸ Checks, in order:</p>
+      <p style="margin-left:1.2rem; margin-bottom:0.3rem">▸ are the sources behind each top item really independent?</p>
+      <p style="margin-left:1.2rem; margin-bottom:0.3rem">▸ apply the ranking rules with your corrections, and log every departure with its reason and record IDs</p>
+      <p style="margin-left:1.2rem; margin-bottom:0.3rem">▸ flag any rationale claim its records don't support</p>
+      <p style="margin-left:1.2rem; margin-bottom:0.3rem">▸ spot-check 10 random records</p>
+      <p style="margin-bottom:0.4rem">▸ Never write an identifier or number from memory; use <code>[VERIFY]</code>.</p>
+      <p>▸ Write one <code>REVIEW.md</code> (corrected table, corrections, flags, spot check, verdict), then stop.</p>
+    </div>
+  </div>
+
+  <div class="step-row">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <h4>Start a new Claude Code session in that folder</h4>
+      <p>Send <code>@PROMPT.md</code>. Afterwards, check its transcript: it should have touched only its folder and the sources it fetched.</p>
+    </div>
+  </div>
+
+  <h3 style="margin:1.5rem 0 0.8rem; font-size:0.95rem; color:var(--ink)">Tested, Not Adopted</h3>
+  <div style="overflow-x:auto; margin-bottom:1rem;">
+    <table>
+      <tr><th>Option</th><th>What the test showed</th><th>Decision</th></tr>
+      <tr><td>Thinking on for screening (53 disputed items)</td><td>Sent on 17 of 20 items the grader included (off: 15), and let through 0 of 18 grader exclusions (off: 3). But it marked 44 of 53 "uncertain" and took 744 s against 42 s.</td><td>Use only as a second look at exclusions (planned, not built).</td></tr>
+      <tr><td>Thinking on for extraction (4 hard papers)</td><td>Judged 2 papers correctly that thinking off got wrong. But 8 of 13 calls ran out of tokens at 8,800–14,800, and 2 papers never finished.</td><td>Not used. The script checks and the Claude review do this job reliably.</td></tr>
+      <tr><td>A larger context window (131,072)</td><td>The largest prompt was 32,331 tokens. Lost items failed on writing time, not space.</td><td>Not needed. Smaller groups fixed it, and 0 items were lost.</td></tr>
+      <tr><td>Claude (Sonnet 5.5) re-reading exclusions (blind sample of 57)</td><td>Forwarded 3 of 5 genuine misses, but a later rule ruled all 3 out of scope. No speed gain either, since screening is 7–10% of wall time.</td><td>Not adopted. The remaining misses needed the full text, not a second reader of the abstract.</td></tr>
+      <tr><td>Passing a flag to the model as advice</td><td>The model acted on it in one run and ignored it in the next, on nearly the same input.</td><td>Replaced by the script ranking.</td></tr>
+      <tr><td>A strict evidence rule (explicit rank word required)</td><td>Rejected 66–84% of claims, many of them real.</td><td>Narrowed to the current rule.</td></tr>
+      <tr><td>Counting all of one study's sources once</td><td>Also penalised items truly measured in 5 distinct named cohorts.</td><td>Narrowed to accession-like dataset labels only.</td></tr>
+    </table>
+  </div>
+</section>
+<section id="evidence" class="section">
+  <h2><span class="num mono">05</span> Evidence from the Worked Example</h2>
+  <p class="subtitle">The task: find which blood and CSF markers AI models of cognitive decline use, from 800 PubMed records, then score and rank a top 10 under fixed rules. The harness changes did more than the model change. On the same records and the same model, the improved harness found 14 of 20 papers where the first found 10, and the review's corrections fell from 3 to 0.</p>
+
+  <div style="overflow-x:auto; margin-bottom:1rem;">
+    <table>
+      <tr>
+        <th>Measure</th>
+        <th>Claude only<br>(25 Sep)</th>
+        <th>Round 1: qwen36<br>v1 (28 Sep)</th>
+        <th>Round 2: qwen38<br>v1 (30 Sep)</th>
+        <th>Round 3: qwen38<br>v2 (7 Oct)</th>
+        <th>Round 3 + checks<br>(8 Oct)</th>
+      </tr>
+      <tr><td>Verified evidence records</td><td>396</td><td>578</td><td>663</td><td>827</td><td>827</td></tr>
+      <tr><td>Disputed papers the grader included that were found (of 20)</td><td>11</td><td>9</td><td>10</td><td><strong>14</strong></td><td><strong>14</strong></td></tr>
+      <tr><td>Disputed papers the grader excluded but let in (of 18)</td><td>4</td><td>14</td><td>7</td><td>11</td><td>11</td></tr>
+      <tr><td>Quotes that don't name their subject</td><td>5%</td><td>18%</td><td>26%</td><td><strong>2%</strong></td><td><strong>2%</strong></td></tr>
+      <tr><td>Importance claims the quote doesn't show</td><td>42%</td><td>54%</td><td>65%</td><td>54%</td><td><strong>0%</strong> after the check</td></tr>
+      <tr><td>Top-10 entries the review replaced</td><td>—</td><td>6</td><td>3</td><td>3</td><td><strong>1, then 0</strong></td></tr>
+    </table>
+  </div>
+
+  <h3 style="margin-bottom:0.8rem; font-size:0.95rem; color:var(--ink)">How to read it</h3>
+  <div class="card">
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p>The disputed set is the 53 papers where the first two arms disagreed. A Claude grader decided 38 of them; it is itself an LLM, and a human grading is still pending.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p>Round 3 + checks re-used round 3's screening and extraction, so the first three rows don't change.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p>The improved harness over-includes: 11 of 18 grader exclusions got through. All 11 turn on rules the task owner hadn't yet decided, such as whether predicting amyloid status counts as a cognitive outcome. Settle rules like these in the brief before the run.</p>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="setup" class="section">
+  <h2><span class="num mono">06</span> Setting Up a New Task</h2>
+  <p class="subtitle">The planner session works through these in order. Steps 1–4 make no IndicStack calls. Every later step that does needs the task owner's go-ahead.</p>
+
+  <div class="step-row">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h4>Write the brief</h4>
+      <p>Cover the task, the inclusion rules, the fields to extract with their allowed values, the scoring and ranking rules, and the output files. List the judgement calls only the owner can make, and settle them now. Freeze it and record its hash.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h4>Plan the folders</h4>
+      <p>One dated folder per run, holding the call log, per-stage JSONL files, outputs and run metadata. Re-runs copy what they reuse and say so.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <h4>Build the scripts</h4>
+      <p>Source fetch (every ID from the source), caps, the word-for-word quote check, scoring, validation, and an independent grader.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <h4>Build the client and limiter, test offline</h4>
+      <p>Use a local stub server on 127.0.0.1 that simulates a hang, a stall, a slow reply, a runaway, a cut-off, an empty reply, broken JSON, a 503, repeated 429s and a resume. The example had 46 such tests.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <h4>Probe the model</h4>
+      <p>One real call per model (a listing isn't proof of service); measure the served window with a max_tokens ladder; confirm thinking off works, the JSON schema is honoured, and 8 parallel calls succeed.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <h4>Write the worker prompts</h4>
+      <p>Shared text first and the task line last; quote the brief's rules word for word; give known facts as harness facts; use a strict JSON schema; allow "uncertain" at screening.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">7</div>
+    <div class="step-body">
+      <h4>Calibrate</h4>
+      <p>On the hardest ~50 items. The planner reviews the settings file.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">8</div>
+    <div class="step-body">
+      <h4>Smoke test</h4>
+      <p>On about 25 items, then do the full run.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">9</div>
+    <div class="step-body">
+      <h4>Grade, then run the isolated review</h4>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">10</div>
+    <div class="step-body">
+      <h4>Turn repeated review findings into script checks</h4>
+      <p>Re-run only the affected stages, into a new folder.</p>
+    </div>
+  </div>
+  <div class="step-row">
+    <div class="step-num">11</div>
+    <div class="step-body">
+      <h4>Have a human check a sample</h4>
+      <p>Before anything is used. In the example, every judge so far has been a Claude model.</p>
+    </div>
+  </div>
+
+  <div class="dark-strip">
+    <strong>Planned for the example's next round (not built):</strong> a thinking-on second look, only at "uncertain" items and exclusions · a full-text pass for borderline exclusions, run alongside extraction · 16 items per extraction call, if cached prompt tokens aren't billed lower · more sources (trials, devices, preprints)
+  </div>
+
+  <h3 style="margin:1.5rem 0 0.8rem; font-size:0.95rem; color:var(--ink)">Setup on Windows</h3>
+  <div class="dark-strip">
+    <span class="mono" style="color:var(--accent); font-size:0.75rem;">ON WINDOWS</span><br><br>
+    Install Node.js 18 or later and Claude Code. No WSL, no Python, no npm packages. The harness uses only Node's built-in modules (<code>fetch</code>, streams, <code>fs</code>). Set the key once with:<br>
+    <code style="display:inline-block; margin-top:0.5rem; background:rgba(255,255,255,0.08); padding:4px 10px; border-radius:4px;">setx INDICSTACK_API_KEY "&lt;your key&gt;"</code><br>
+    Endpoint: <code>https://api.indicstack.ai/v1</code> (OpenAI-compatible, vLLM behind LiteLLM).
+  </div>
+
+  <div style="overflow-x:auto; margin-top:1rem;">
+    <table>
+      <tr><th>Install up front</th><th>Why</th><th>How</th></tr>
+      <tr><td>Node.js 18+ (tested on 24.19.0)</td><td>Runs the harness, API client, checks and tests</td><td><code>winget install OpenJS.NodeJS.LTS</code>, then open a new terminal so PATH picks it up</td></tr>
+      <tr><td>Claude Code</td><td>The planner and reviewer sessions (Opus 5.5 in the example)</td><td>However your team installs it</td></tr>
+      <tr><td>IndicStack API key</td><td>Worker calls</td><td>From ops. Set as a user environment variable</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Why Node rather than Python</h3>
+    <p>On the machine where this was built, Windows 11 Smart App Control blocks native Python packages such as pandas at import, but the signed Node.js installer runs. If Smart App Control is off on your machine, either language works. Don't turn it off to make Python work.</p>
+  </div>
+
+  <div class="card">
+    <h3>Ground rules</h3>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p><strong>Facts come from scripts and sources.</strong> The model writes only judgement and prose. Never take an identifier, citation or number from model output; join it from the source.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p><strong>Keep the API key out of code, logs and git.</strong> Read it from an environment variable at runtime.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p><strong>Freeze the task brief before the first run.</strong> Hash it, and have the harness refuse to run if the hash changes. Rule changes go into a new brief version.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p><strong>Never overwrite a run.</strong> A re-run goes into a new dated folder that records what it copied.</p>
+      </div>
+    </div>
+    <div class="check-item">
+      <span class="check-icon">▸</span>
+      <div class="check-content">
+        <p><strong>If the models stop responding, ask ops before reporting it.</strong> During this work, those periods were GPUs taken offline for optimisation, not faults.</p>
+      </div>
+    </div>
+  </div>
+</section>
+<section id="ops" class="section">
+  <h2><span class="num mono">07</span> Platform Notes for Ops</h2>
+  <p class="subtitle">Things coders will trip over on the IndicStack API, each found by a probe or a run.</p>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Thinking is on by default for qwen</h3>
+    <p>A reply can come back blank once the budget is spent on hidden reasoning.</p>
+    <p class="detail"><strong>What coders should do:</strong> send <code>chat_template_kwargs: {"enable_thinking": false}</code> unless thinking is wanted.<br><strong>Ask of ops:</strong> state the default in the docs.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Retired models stay listed in /v1/models</h3>
+    <p>qwen3-8b, qwen36-27b, gemma4-31b all return 400 despite being listed.</p>
+    <p class="detail"><strong>What coders should do:</strong> send one test call per model; don't trust the listing.<br><strong>Ask of ops:</strong> remove retired models from the listing.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>/v1/models doesn't report the context window</h3>
+    <p>The served window changed from 65,536 (30 Sep) to 131,072 (7 Oct) without notice.</p>
+    <p class="detail"><strong>What coders should do:</strong> measure it with a max_tokens ladder before relying on it.<br><strong>Ask of ops:</strong> publish max_model_len, and give notice of changes.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Per-key credit cap returns 429</h3>
+    <p>"your credit balance may be exhausted, or you are sending too fast"</p>
+    <p class="detail"><strong>What coders should do:</strong> treat repeated 429s as a pause, with a breaker and resume, not as a reason to resend.<br><strong>Ask of ops:</strong> separate the credit message from the rate-limit message.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Writing speed per call varies by day</h3>
+    <p>Extraction ran at 43 tokens/s per call on 30 Sep and 14.6 on 7 Oct.</p>
+    <p class="detail"><strong>What coders should do:</strong> calibrate before each long run; scale timeouts with the answer budget.</p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" onclick="this.classList.toggle('open')">
+    <h3>Prefix-cache reuse works</h3>
+    <p>A paper's first read took 6.3 s to the first token; a repeat took 0.74 s.</p>
+    <p class="detail"><strong>What coders should do:</strong> keep the shared text at the start of the prompt and vary only the end.<br><strong>Ask of ops:</strong> are cached prompt tokens billed at a lower rate? Are abandoned requests billed? <code>[VERIFY]</code></p>
+    <p class="toggle">+ details</p>
+  </div>
+
+  <div class="card" style="margin-top:1.5rem;">
+    <h3>Where the evidence lives</h3>
+    <p>Every figure here comes from the example project's dated log, call logs and review files, kept in the author's workspace repository. Ask the author (Prasanth Ghanta) for access, or for the original harness code, if you want to compare against it.</p>
+  </div>
+</section>
+
+<div class="footer">
+  A general pattern, built and tested between 25 September and 9 October 2026. STARTER: for internal review only.<br>
+  Settings, measured values and the worked example are in <code>PLANNER-WORKER-REVIEWER.md</code>.
+</div>
+
+<script>
+  // Tab navigation
+  const navBtns = document.querySelectorAll('nav button');
+  const sections = document.querySelectorAll('.section');
+  navBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.section;
+      navBtns.forEach(b => b.classList.remove('active'));
+      sections.forEach(s => s.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(target).classList.add('active');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  // Keyboard: left/right arrows to switch tabs
+  let activeIdx = 0;
+  navBtns.forEach((btn, i) => {
+    if (btn.classList.contains('active')) activeIdx = i;
+  });
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowRight' && activeIdx < navBtns.length - 1) {
+      activeIdx++; navBtns[activeIdx].click();
+    } else if (e.key === 'ArrowLeft' && activeIdx > 0) {
+      activeIdx--; navBtns[activeIdx].click();
+    }
+  });
+
+  // Fix toggle text on click
+  document.querySelectorAll('.card .toggle').forEach(t => {
+    t.closest('.card').addEventListener('click', () => {
+      t.textContent = t.closest('.card').classList.contains('open') ? '− details' : '+ details';
+    });
+  });
+</script>
+</body>
+</html>
